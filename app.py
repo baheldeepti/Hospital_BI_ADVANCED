@@ -336,7 +336,8 @@ def los_prep(data: pd.DataFrame):
 
 # ---------------- OpenAI helpers (no hardcoding) ----------------
 def get_openai_client():
-    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+    openai.api_key = st.secrets.get("OPENAI_API_KEY") or st.session_state.get("OPENAI_API_KEY")
+
     if not key:
         st.info("OpenAI disabled: no OPENAI_API_KEY in Secrets or env.")
         return None
