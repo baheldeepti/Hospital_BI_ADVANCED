@@ -34,7 +34,8 @@ st.set_page_config(
 )
 
 APP_NAME = "Hospital Operations Cockpit"
-DEFAULT_CSV_PATH = "/mnt/data/modified_healthcare_dataset.csv"  # preloaded in this environment
+DEFAULT_CSV_PATH = "https://raw.githubusercontent.com/baheldeepti/hospital-streamlit-app/main/modified_healthcare_dataset.csv"
+ # preloaded in this environment
 
 # ========== UTILITIES ==========
 
