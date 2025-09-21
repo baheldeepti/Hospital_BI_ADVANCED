@@ -1,20 +1,13 @@
-# app.py — Hospital Ops Studio: Control Tower (Corrected)
-# Product DNA: Manisha Arora (decisions-first, experiments, comms) + Product-with-Pri (clarity, governance)
+# app.py — Hospital Ops Studio: Control Tower (Executive-ready)
 # Sections:
 #   1) Admissions Control  — forecasting → staffing targets (+ AI exec/analyst explainer)
 #   2) Revenue Watch       — billing anomalies + root-cause (+ AI exec/analyst explainer)
 #   3) LOS Planner         — LOS buckets + equity slices (+ AI exec/analyst explainer)
+#   4) Data Chat           — freeform Q&A over the dataset (code-gen, execute, chart, summarize)
 #
-# Extras:
-#   - Cohort Explorer (facility/insurer/ICD) for Admissions
-#   - Seasonality Heatmap + surge scenario sliders
-#   - Action Footers with Owner/Decision/SLA -> Decision Log (downloadable)
-#   - Calm clinical theme; full-width, no sidebar
-#   - Cloud-friendly deps (statsmodels SARIMAX + Holt-Winters). Prophet & XGBoost are optional.
-#
-# Data: Loads default CSV from GitHub (can be overridden via uploader)
+# Calibrated for Streamlit Cloud; Prophet/XGBoost are optional.
 
-import os, json, textwrap
+import os, json, textwrap, re, traceback
 from datetime import datetime, date
 from typing import Dict, List
 import numpy as np
@@ -22,6 +15,7 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+import altair as alt
 
 # Optional (auto-detected). NOT required; app degrades gracefully.
 try:
@@ -42,7 +36,7 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, label_binarize
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, label_binarize
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
@@ -74,7 +68,7 @@ hr{border-top:1px solid #eee}
 """, unsafe_allow_html=True)
 
 st.title("Hospital Ops Studio — Control Tower")
-st.caption("Admissions Control • Revenue Watch • LOS Planner — decisions first, dashboards second")
+st.caption("Admissions Control • Revenue Watch • LOS Planner • Data Chat — decisions first, dashboards second")
 
 # ---------------- DATA LOAD & FE ----------------
 ICD_MAPPING = {
@@ -137,6 +131,10 @@ with st.expander("Data source (optional override)"):
             st.success(f"Loaded {len(df):,} rows from upload.")
         except Exception as e:
             st.error(f"Failed to read uploaded CSV: {e}")
+
+# Make the current dataset available to the Data Chat tab by default
+if "main_df" not in st.session_state or st.session_state["main_df"] is None:
+    st.session_state["main_df"] = df.copy()
 
 # ---------------- SHARED FILTERS ----------------
 def render_filters(data: pd.DataFrame) -> pd.DataFrame:
@@ -334,25 +332,36 @@ def los_prep(data: pd.DataFrame):
     for c in cat_cols: X[c] = X[c].fillna("Unknown")
     return X, y, num_cols, cat_cols, d
 
-# ---------------- OpenAI helpers (no hardcoding) ----------------
-def get_openai_client():
-    openai.api_key = st.secrets.get("OPENAI_API_KEY") or st.session_state.get("OPENAI_API_KEY")
-
+# ---------------- OpenAI helpers (safe, no hardcoding) ----------------
+def _get_openai_client():
+    """
+    Initialize OpenAI client from (priority):
+      1) st.secrets["OPENAI_API_KEY"]
+      2) os.environ["OPENAI_API_KEY"]
+      3) st.session_state["OPENAI_API_KEY"] (manual entry)
+    Validates key prefix and falls back gracefully.
+    """
+    key = (
+        st.secrets.get("OPENAI_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or st.session_state.get("OPENAI_API_KEY")
+    )
     if not key:
-        st.info("OpenAI disabled: no OPENAI_API_KEY in Secrets or env.")
+        st.info("OpenAI disabled: no OPENAI_API_KEY in Secrets/env/session.")
         return None
+    key = key.strip()
     if not key.startswith("sk-"):
         st.error("OPENAI_API_KEY looks invalid (must start with 'sk-').")
         return None
     try:
-        from openai import OpenAI  # imported here to avoid import error if package missing
+        from openai import OpenAI
         return OpenAI(api_key=key)
     except Exception as e:
         st.error(f"Could not initialize OpenAI client: {e}")
         return None
 
-def choose_model_fallback():
-    preferred = st.secrets.get("PREFERRED_OPENAI_MODEL", "").strip()
+def _model_fallback():
+    preferred = (st.secrets.get("PREFERRED_OPENAI_MODEL","") or os.environ.get("PREFERRED_OPENAI_MODEL","")).strip()
     cascade = [m for m in [
         preferred or None,
         "gpt-4o",
@@ -362,20 +371,16 @@ def choose_model_fallback():
     ] if m]
     return cascade
 
-def try_chat_completion(client, model, messages, temperature=0.2):
+def _try_chat(client, model, messages, temperature=0.2):
     try:
-        rsp = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature
-        )
+        rsp = client.chat.completions.create(model=model, messages=messages, temperature=temperature)
         return rsp.choices[0].message.content, None
     except Exception as e:
         return None, str(e)
 
 # ---------------- AI WRITER (per section, Exec/Analyst) ----------------
 def ai_write(section_title: str, payload: dict):
-    client = get_openai_client()
+    client = _get_openai_client()
 
     col1, col2 = st.columns([1, 2])
     use_ai = col1.checkbox(
@@ -402,21 +407,19 @@ def ai_write(section_title: str, payload: dict):
             {"role": "user", "content": prompt},
         ]
 
-        chosen_model = None
+        chosen = None
         last_err = None
-
-        for model in choose_model_fallback():
-            content, err = try_chat_completion(client, model, messages, temperature=0.2)
+        for model in _model_fallback():
+            content, err = _try_chat(client, model, messages, temperature=0.2)
             if err is None and content:
-                chosen_model = model
+                chosen = model
                 st.markdown(content)
                 with st.expander("AI diagnostics (model used)", expanded=False):
                     st.caption(f"Model: `{model}`")
                 break
-            else:
-                last_err = err
+            last_err = err
 
-        if chosen_model is None:
+        if chosen is None:
             st.error("OpenAI call failed on all fallback models.")
             if last_err:
                 st.caption(f"Last error: {last_err}")
@@ -451,13 +454,183 @@ def action_footer(section: str):
             "sla": f"{sla_date} {sla_time}", "note": note
         })
         st.success("Saved to Decision Log.")
-    if colB.button("Prepare CSV for Decision Log"):
-        df_log = pd.DataFrame(st.session_state["decision_log"])
-        csv = df_log.to_csv(index=False).encode("utf-8")
-        st.download_button("Download Decision Log CSV", data=csv, file_name="decision_log.csv", mime="text/csv")
+    # Always show a download button so execs can export any time
+    df_log = pd.DataFrame(st.session_state["decision_log"])
+    st.download_button(
+        label="Download Decision Log (CSV)",
+        data=df_log.to_csv(index=False).encode("utf-8"),
+        file_name="decision_log.csv", mime="text/csv",
+        key=f"dl_{section}"
+    )
+
+# ---------------- DATA CHAT (your earlier AI component, integrated) ----------------
+# Session keys for chat
+for k in ["history", "query_log", "fallback_log"]:
+    if k not in st.session_state:
+        st.session_state[k] = []
+
+def _load_data_ui():
+    with st.sidebar.expander("📁 Data for Chat (optional override)", expanded=False):
+        st.markdown("Load sample or upload a CSV just for the Data Chat tab.")
+        if st.button("📥 Use Sample Data for Chat"):
+            try:
+                chat_df = pd.read_csv(RAW_URL)
+                st.session_state["main_df"] = chat_df
+                st.success("✅ Sample dataset loaded for Data Chat.")
+            except Exception as e:
+                st.error(f"Error loading sample: {e}")
+        uploaded_file = st.file_uploader("Upload CSV for Chat", type="csv", key="chat_uploader")
+        if uploaded_file:
+            try:
+                chat_df = pd.read_csv(uploaded_file)
+                st.session_state["main_df"] = chat_df
+                st.success("✅ Uploaded data loaded for Data Chat.")
+                st.dataframe(chat_df.head(10))
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
+
+def _try_visualize(result):
+    try:
+        if isinstance(result, pd.Series):
+            df_plot = result.reset_index()
+        elif isinstance(result, pd.DataFrame):
+            df_plot = result.reset_index(drop=True)
+        else:
+            st.warning("Unsupported result type for visualization.")
+            return
+
+        numeric_cols = df_plot.select_dtypes(include='number').columns.tolist()
+        non_numeric_cols = df_plot.select_dtypes(exclude='number').columns.tolist()
+        if not numeric_cols or not non_numeric_cols:
+            st.info("Showing raw results (not enough columns to chart).")
+            return
+
+        y_col = numeric_cols[0]
+        x_col = non_numeric_cols[0]
+        color_col = non_numeric_cols[1] if len(non_numeric_cols) > 1 else None
+
+        selected_cols = [x_col, y_col] if not color_col else [x_col, color_col, y_col]
+        df_plot = df_plot[selected_cols].dropna()
+        df_plot.columns = ["Category"] + (["Subgroup"] if color_col else []) + ["Value"]
+
+        chart = alt.Chart(df_plot).mark_bar().encode(
+            x=alt.X("Category:N", sort="-y", title="Category"),
+            y=alt.Y("Value:Q", title="Value"),
+            tooltip=["Category", "Value"] + (["Subgroup"] if color_col else [])
+        )
+        if color_col:
+            chart = chart.encode(color="Subgroup:N")
+        st.altair_chart(chart.properties(width=700, height=400), use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not render chart: {e}")
+
+def _format_summary(summary_text: str) -> str:
+    return f"📝 **Summary:** {summary_text.strip()}"
+
+def _chat_summary(client, question, result_str):
+    # concise summarizer prompt
+    messages = [
+        {"role":"system", "content":"You summarize data insights for hospital leaders in crisp, non-technical bullet points."},
+        {"role":"user", "content": f"The user asked: {question}\nThe result of the query was:\n{result_str}\nSummarize clearly in 3-5 bullets."}
+    ]
+    for model in _model_fallback():
+        content, err = _try_chat(client, model, messages, temperature=0.1)
+        if err is None and content:
+            return _format_summary(content)
+    return ""
+
+def _handle_chat(question):
+    df_chat = st.session_state.get("main_df")
+    if df_chat is None:
+        st.warning("Please load data for the Data Chat tab.")
+        return
+
+    # ensure date-like columns parse to datetime
+    for col in df_chat.columns:
+        if any(k in col.lower() for k in ["date","admission","discharge"]):
+            try:
+                df_chat[col] = pd.to_datetime(df_chat[col], errors="coerce")
+            except Exception:
+                pass
+
+    columns = ", ".join(df_chat.columns)
+    st.chat_message("user").write(question)
+    st.session_state.history.append({"role": "user", "content": question})
+    st.session_state.query_log.append(question)
+
+    # Code-gen prompt (pandas only, assign to `result`)
+    convo = json.dumps(st.session_state.history, ensure_ascii=False)
+    code_prompt = (
+        f"You are a senior data analyst working with a pandas DataFrame named df.\n"
+        f"Available columns: {columns}\n"
+        f"Conversation so far: {convo}\n\n"
+        "Write executable pandas code to answer the **last user question only**.\n"
+        "- Assign output to a variable named `result`\n"
+        "- Use only valid column names from the DataFrame\n"
+        "- Do not include explanations or print statements\n"
+        "- Only output valid Python code"
+    )
+
+    client = _get_openai_client()
+    if client is None:
+        st.error("OpenAI is not configured. Add OPENAI_API_KEY in Secrets or env.")
+        return
+
+    code = None
+    gen_messages = [{"role":"user","content":code_prompt}]
+    for model in _model_fallback():
+        content, err = _try_chat(client, model, gen_messages, temperature=0)
+        if err is None and content:
+            # strip code fences if present
+            code = re.sub(r"(?s)```(?:python)?\s*(.*?)\s*```", r"\\1", content).strip("` \n")
+            break
+    if not code:
+        st.session_state.fallback_log.append(question)
+        st.chat_message("assistant").error("Could not generate code for this query.")
+        return
+
+    st.code(code, language="python")
+    try:
+        local_vars = {"df": df_chat.copy(), "pd": pd, "np": np}
+        exec(code, {}, local_vars)
+        result = local_vars.get("result", "No result")
+
+        with st.chat_message("assistant"):
+            if isinstance(result, (pd.Series, pd.DataFrame)):
+                st.dataframe(result, use_container_width=True)
+                _try_visualize(result)
+            else:
+                st.write(str(result))
+
+            summary = _chat_summary(client, question, str(result)[:3000])
+            if summary:
+                st.markdown(summary)
+                st.session_state.history.append({"role": "assistant", "content": summary})
+
+    except Exception:
+        st.session_state.fallback_log.append(question)
+        st.chat_message("assistant").error(f"Error:\n{traceback.format_exc()}")
+
+def _render_logs():
+    st.subheader("🪵 Conversation Logs")
+    query_log = st.session_state.get("query_log", [])
+    if query_log:
+        st.markdown("### 🔁 Most Asked Questions")
+        log_df = pd.DataFrame(query_log, columns=["Query"])
+        value_counts = log_df["Query"].value_counts().reset_index()
+        value_counts.columns = ["Query", "Count"]
+        st.dataframe(value_counts, use_container_width=True)
+    else:
+        st.info("No queries logged yet.")
+
+    fallback_log = st.session_state.get("fallback_log", [])
+    if fallback_log:
+        st.markdown("### ⚠️ Fallback Queries (Unanswered)")
+        fallback_df = pd.DataFrame(fallback_log, columns=["Query"])
+        st.dataframe(fallback_df, use_container_width=True)
 
 # ---------------- NAV ----------------
-tabs = st.tabs(["📈 Admissions Control", "🧾 Revenue Watch", "🛏️ LOS Planner"])
+tabs = st.tabs(["📈 Admissions Control", "🧾 Revenue Watch", "🛏️ LOS Planner", "💬 Data Chat"])
 
 # ===== 1) Admissions Control =====
 with tabs[0]:
@@ -579,8 +752,6 @@ with tabs[1]:
             drill = st.selectbox("Group anomalies by", dims, index=0)
 
             if isinstance(an, pd.DataFrame) and not an.empty:
-                last_cut = pd.to_datetime(an["ds"]).max()
-                _ = last_cut  # reserved if you later need baseline windowing
                 # Build anomaly-day flags using .dt.date (fix for AttributeError)
                 fdf_agg = fdf.set_index("admit_date")
                 an_series = pd.to_datetime(an.loc[an["anomaly"], "ds"])
@@ -647,14 +818,17 @@ with tabs[2]:
                 X, y, test_size=0.25, random_state=42
             )
 
+        # Proper preprocessing: scale nums, ONE-HOT encode cats (fix for LOS tab showing nothing)
         pre = ColumnTransformer(
-            [("num", StandardScaler(), [c for c in num_cols if c in X.columns]),
-             ("cat", "passthrough", [c for c in cat_cols if c in X.columns])],
+            transformers=[
+                ("num", StandardScaler(), [c for c in num_cols if c in X.columns]),
+                ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), [c for c in cat_cols if c in X.columns]),
+            ],
             remainder="drop"
         )
 
         models = {
-            "Logistic Regression": Pipeline([("pre", pre), ("clf", LogisticRegression(max_iter=400, multi_class="multinomial"))]),
+            "Logistic Regression": Pipeline([("pre", pre), ("clf", LogisticRegression(max_iter=600, multi_class="multinomial"))]),
             "Random Forest": Pipeline([("pre", pre), ("clf", RandomForestClassifier(n_estimators=400, random_state=42))]),
         }
         if _HAS_XGB:
@@ -663,13 +837,14 @@ with tabs[2]:
                 objective="multi:softprob", eval_metric="mlogloss", random_state=42
             ))])
 
-        classes = sorted(y.unique().tolist())
+        classes = sorted(y.dropna().unique().tolist())
         try:
-            y_test_bin = label_binarize(y_test, classes=classes)
+            # ensure same classes order for binarization
+            y_test_bin = label_binarize(y[y.index.isin(X_test.index)], classes=classes)
         except Exception:
             y_test_bin = None
 
-        results = {}; roc_curves = {}; proba_store = {}
+        results = {}; roc_curves = {}
         for name, pipe in models.items():
             pipe.fit(X_train, y_train)
             y_pred = pipe.predict(X_test)
@@ -683,15 +858,14 @@ with tabs[2]:
             auc = None; fprs={}; tprs={}
             if (y_test_bin is not None) and (y_proba is not None) and (y_proba.shape[1]==len(classes)):
                 try:
-                    auc = roc_auc_score(y_test_bin, y_proba, average="weighted", multi_class="ovr")
+                    auc = roc_auc_score(label_binarize(y_test, classes=classes), y_proba, average="weighted", multi_class="ovr")
                     for i, cls in enumerate(classes):
-                        fpr, tpr, _ = roc_curve(y_test_bin[:,i], y_proba[:,i])
+                        fpr, tpr, _ = roc_curve(label_binarize(y_test, classes=classes)[:,i], y_proba[:,i])
                         fprs[cls] = fpr; tprs[cls] = tpr
                 except Exception:
                     pass
             results[name] = {"Accuracy":acc, "Precision":pr, "Recall":rc, "F1":f1, "ROC-AUC":auc}
             roc_curves[name] = (fprs, tprs)
-            proba_store[name] = (y_pred, y_proba)
 
         perf = pd.DataFrame(results).T
         for c in ["Accuracy","Precision","Recall","F1","ROC-AUC"]:
@@ -718,6 +892,7 @@ with tabs[2]:
         slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
         slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if "insurer" in slice_dim_options else 0) if slice_dim_options else None
         if slice_dim:
+            # re-fit best_pipe to be safe
             best_pipe = models[top_model]
             X_test_idx = X_test.index
             slice_vals = d_full.loc[X_test_idx, slice_dim].fillna("Unknown")
@@ -740,6 +915,16 @@ with tabs[2]:
         ai_write("LOS Planner", ai_payload)
         action_footer("LOS Planner")
 
+# ===== 4) Data Chat =====
+with tabs[3]:
+    st.subheader("💬 Data Chat — Ask questions, get code-backed answers & charts")
+    _load_data_ui()
+    prompt = st.chat_input("Ask a question about the dataset...")
+    if prompt:
+        _handle_chat(prompt)
+    st.markdown("---")
+    _render_logs()
+
 # --------------- FOOTER: Decision Log quick peek ---------------
 with st.expander("Decision Log (peek)"):
     df_log = pd.DataFrame(st.session_state["decision_log"])
@@ -747,3 +932,9 @@ with st.expander("Decision Log (peek)"):
         st.info("No decisions logged yet.")
     else:
         st.dataframe(df_log, use_container_width=True)
+        st.download_button(
+            label="Download Decision Log (CSV)",
+            data=df_log.to_csv(index=False).encode("utf-8"),
+            file_name="decision_log.csv", mime="text/csv",
+            key="dl_footer"
+        )
