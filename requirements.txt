@@ -1,10 +1,2 @@
-python-dateutil>=2.9.0.post0
-streamlit==1.49.1 
-pandas==2.2.2 
-numpy==1.26.4 
-plotly==5.22.0 
-scikit-learn==1.5.2 
-statsmodels==0.14.2 
-xgboost==2.1.1
-openai==1.44.1 
+streamlit==1.49.1 pandas==2.2.2 numpy==1.26.4 plotly==5.22.0 scikit-learn==1.5.2 statsmodels==0.14.2 openai==1.44.1 xgboost==2.1.1 
 prophet==1.1.5
