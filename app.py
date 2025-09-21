@@ -126,9 +126,11 @@ with st.expander("Data source (optional override)"):
     if up is not None:
         try:
             df = pd.read_csv(up)
-            st.success(f"Loaded rows from upload.")
+            n_rows = len(df)                     # <- compute count
+            st.success(f"Loaded {n_rows:,} rows from upload.")  # <- no brackets mix-up
         except Exception as e:
             st.error(f"Failed to read uploaded CSV: {e}")
+
 
 # ---------------- SHARED FILTERS ----------------
 def render_filters(data: pd.DataFrame) -> pd.DataFrame:
