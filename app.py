@@ -26,7 +26,7 @@ from openai import OpenAI
 # --- OpenAI client helper (no hardcoding, validation, graceful fail) ---
 def get_openai_client():
     from typing import Optional
-    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "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")).strip()
     if not key:
         st.info("OpenAI is disabled (no OPENAI_API_KEY found in Secrets or environment).")
         return None
