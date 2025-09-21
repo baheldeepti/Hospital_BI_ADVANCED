@@ -602,26 +602,38 @@ with tabs[1]:
         plot_anoms(an, "Billing Amount with Anomalies")
 
         # Root-cause drilldowns (available dims)
+        # Root-cause drilldowns (available dims)
         st.markdown("#### Root-cause explorer")
         dims = [d for d in ["insurer","hospital","condition","doctor"] if d in fdf.columns]
         if not dims:
             st.info("No categorical dimensions available for drilldown.")
         else:
             drill = st.selectbox("Group anomalies by", dims, index=0)
+        
             # recent vs baseline comparison
-            last_cut = an["ds"].max()
-            baseline_cut = last_cut - pd.Timedelta(weeks=baseline_weeks)
-            fdf_agg = fdf.set_index("admit_date")
-            recent_mask = fdf_agg.index > baseline_cut
-            # tagging anomaly days to join
-            an_days = set(pd.to_datetime(an[an["anomaly"]]["ds"]).date)
-            fdf_agg["is_anom_day"] = fdf_agg.index.date.astype(object).isin(an_days).astype(int)
-            grp = fdf_agg.groupby(drill).agg(
-                billing_total=("billing_amount","sum"),
-                encounters=("billing_amount","count"),
-                anomaly_days=("is_anom_day","sum")
-            ).reset_index().sort_values("anomaly_days", ascending=False)
-            st.dataframe(grp, use_container_width=True)
+            if isinstance(an, pd.DataFrame) and not an.empty:
+                last_cut = pd.to_datetime(an["ds"]).max()
+                baseline_cut = last_cut - pd.Timedelta(weeks=baseline_weeks)
+        
+                fdf_agg = fdf.set_index("admit_date")
+                # tagging anomaly days to join
+                # ✅ use .dt.date, not .date
+                an_series = pd.to_datetime(an.loc[an["anomaly"], "ds"])
+                an_days = set(an_series.dt.date.tolist())
+        
+                # ✅ fdf_agg.index is DatetimeIndex; .date returns ndarray of datetime.date
+                fdf_agg["is_anom_day"] = pd.Series(fdf_agg.index.date, index=fdf_agg.index).isin(an_days).astype(int)
+        
+                grp = fdf_agg.groupby(drill).agg(
+                    billing_total=("billing_amount","sum"),
+                    encounters=("billing_amount","count"),
+                    anomaly_days=("is_anom_day","sum")
+                ).reset_index().sort_values("anomaly_days", ascending=False)
+        
+                st.dataframe(grp, use_container_width=True)
+            else:
+                st.info("No anomalies available for drilldown in the current window.")
+
 
         # Recent anomaly facts
         recent = an.tail(30); flagged = recent[recent["anomaly"]]
