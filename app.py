@@ -26,7 +26,7 @@ from openai import OpenAI
 # --- OpenAI client helper (no hardcoding, validation, graceful fail) ---
 def get_openai_client():
     from typing import Optional
-    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "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")).strip()
+    key = st.secrets.get("OPENAI_API_KEY", "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")).strip()
     if not key:
         st.info("OpenAI is disabled (no OPENAI_API_KEY found in Secrets or environment).")
         return None
@@ -359,7 +359,7 @@ def los_prep(data: pd.DataFrame):
 # ---------------- AI WRITER (per section, Exec/Analyst) ----------------
 def ai_write(section_title: str, payload: dict):
     # Load key from Secrets (Streamlit Cloud) or environment (local/on-prem)
-    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "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")).strip()
+    key = st.secrets.get("OPENAI_API_KEY", "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")).strip()
 
     col1, col2 = st.columns([1, 2])
     use_ai = col1.checkbox(
