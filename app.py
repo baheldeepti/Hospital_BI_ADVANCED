@@ -357,59 +357,114 @@ def los_prep(data: pd.DataFrame):
     return X, y, num_cols, cat_cols, d
 
 # ---------------- AI WRITER (per section, Exec/Analyst) ----------------
+# ---------------- OpenAI helpers (no hardcoding) ----------------
+def get_openai_client():
+    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+    if not key:
+        st.info("OpenAI disabled: no OPENAI_API_KEY in Secrets or env.")
+        return None
+    if not key.startswith("sk-"):
+        st.error("OPENAI_API_KEY looks invalid (must start with 'sk-').")
+        return None
+    try:
+        from openai import OpenAI
+        return OpenAI(api_key=key)
+    except Exception as e:
+        st.error(f"Could not initialize OpenAI client: {e}")
+        return None
+
+
+def choose_model_fallback(client):
+    """
+    Choose a model with graceful fallback:
+    1) Secrets override: PREFERRED_OPENAI_MODEL
+    2) Default cascade: try each until one works
+    """
+    preferred = st.secrets.get("PREFERRED_OPENAI_MODEL", "").strip()
+    # You can customize this list. Put the one you expect to have first.
+    cascade = [m for m in [
+        preferred or None,
+        "gpt-4o",              # widely available on most projects
+        "gpt-4o-mini",         # might be blocked on some projects
+        "o3-mini",             # reasoning-capable small model
+        "gpt-4-turbo",         # legacy but often enabled
+    ] if m]
+
+    return cascade
+
+
+def try_chat_completion(client, model, messages, temperature=0.2):
+    """Attempt a single chat call; return (content, error_string_or_None)."""
+    try:
+        rsp = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature
+        )
+        return rsp.choices[0].message.content, None
+    except Exception as e:
+        return None, str(e)
+
+
+# ---------------- AI WRITER (per section, Exec/Analyst) ----------------
 def ai_write(section_title: str, payload: dict):
-    # Load key from Secrets (Streamlit Cloud) or environment (local/on-prem)
-    key = st.secrets.get("OPENAI_API_KEY", "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")).strip()
+    client = get_openai_client()
 
     col1, col2 = st.columns([1, 2])
     use_ai = col1.checkbox(
-        f"Use AI for {section_title}", 
-        value=bool(key and key.startswith("sk-")), 
+        f"Use AI for {section_title}",
+        value=client is not None,
         key=f"ai_{section_title}"
     )
     analyst = col2.toggle("Analyst mode (more detail)", value=False, key=f"ai_mode_{section_title}")
 
-    if use_ai:
-        if not key or not key.startswith("sk-"):
-            st.error("⚠️ Invalid or missing OPENAI_API_KEY. "
-                     "Keys must start with 'sk-'. Update your Secrets or env.")
+    if use_ai and client:
+        prompt = textwrap.dedent(f"""
+        You are a product-analytics writer for a hospital ops platform.
+        Audience: hospital leaders. Tone: crisp, actionable, non-technical.
+        Write a concise {'executive' if not analyst else 'analyst-grade'} narrative for "{section_title}" (140–220 words).
+        Use ONLY this JSON: {json.dumps(payload, default=str)[:6000]}
+        Include:
+          1) What the results imply for operations ("what / so-what / now-what"),
+          2) A short "Performance & Use Case" table,
+          3) 3–5 concrete recommendations (owners and suggested SLAs).
+        """).strip()
+
+        messages = [
+            {"role": "system", "content": "Be precise, concise, and actionable. Avoid marketing fluff."},
+            {"role": "user", "content": prompt},
+        ]
+
+        chosen_model = None
+        last_err = None
+
+        for model in choose_model_fallback(client):
+            content, err = try_chat_completion(client, model, messages, temperature=0.2)
+            if err is None and content:
+                chosen_model = model
+                st.markdown(content)
+                with st.expander("AI diagnostics (model used)", expanded=False):
+                    st.caption(f"Model: `{model}`")
+                break
+            else:
+                # If 403 / model not found, keep trying the next one
+                last_err = err
+
+        if chosen_model is None:
+            st.error("OpenAI call failed on all fallback models.")
+            if last_err:
+                st.caption(f"Last error: {last_err}")
+            # fall through to deterministic summary
             use_ai = False
-        else:
-            try:
-                from openai import OpenAI
-                client = OpenAI(api_key=key)
-
-                prompt = textwrap.dedent(f"""
-                You are a product-analytics writer for a hospital ops platform.
-                Audience: hospital leaders. Tone: crisp, actionable, non-technical.
-                Write a concise {'executive' if not analyst else 'analyst-grade'} narrative 
-                for "{section_title}" (140–220 words).
-                Use ONLY this JSON: {json.dumps(payload, default=str)[:6000]}
-                Include:
-                  1) What the results imply for operations ("what / so-what / now-what"),
-                  2) A short "Performance & Use Case" table,
-                  3) 3–5 concrete recommendations (owners and suggested SLAs).
-                """).strip()
-
-                rsp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "Be precise, concise, and actionable. Avoid marketing fluff."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.2,
-                )
-                st.markdown(rsp.choices[0].message.content)
-
-            except Exception as e:
-                st.error(f"❌ OpenAI call failed: {type(e).__name__} — {e}")
-                use_ai = False
 
     if not use_ai:
         st.markdown(f"**Deterministic summary ({section_title})**")
         st.json(payload)
-        st.caption("ℹ️ Add a valid OPENAI_API_KEY in Streamlit Secrets or your environment "
-                   "to enable AI-generated executive narratives.")
+        st.caption(
+            "ℹ️ Add OPENAI_API_KEY in Secrets and (optionally) set "
+            "`PREFERRED_OPENAI_MODEL` to a model your project can use. "
+            "The app will auto-fallback if a model is blocked."
+        )
 
 
 # ---------------- ACTION FOOTER + DECISION LOG ----------------
