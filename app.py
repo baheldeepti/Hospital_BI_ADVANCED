@@ -1,4 +1,4 @@
-# app.py — Hospital Ops Studio: Control Tower
+# app.py — Hospital Ops Studio: Control Tower (Corrected)
 # Product DNA: Manisha Arora (decisions-first, experiments, comms) + Product-with-Pri (clarity, governance)
 # Sections:
 #   1) Admissions Control  — forecasting → staffing targets (+ AI exec/analyst explainer)
@@ -14,36 +14,14 @@
 #
 # Data: Loads default CSV from GitHub (can be overridden via uploader)
 
-import os, json, textwrap, io
+import os, json, textwrap
 from datetime import datetime, date
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
-from openai import OpenAI
-# --- OpenAI client helper (no hardcoding, validation, graceful fail) ---
-def get_openai_client():
-    from typing import Optional
-    key = st.secrets.get("OPENAI_API_KEY", "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")).strip()
-    if not key:
-        st.info("OpenAI is disabled (no OPENAI_API_KEY found in Secrets or environment).")
-        return None
-
-    # Minimal sanity check: OpenAI API keys typically start with 'sk-'
-    if not key.startswith("sk-"):
-        st.error("OPENAI_API_KEY is present but looks invalid (should start with 'sk-'). "
-                 "Update your key at https://platform.openai.com/account/api-keys.")
-        return None
-
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=key)
-        return client
-    except Exception as e:
-        st.error(f"Could not initialize OpenAI client: {e}")
-        return None
 
 # Optional (auto-detected). NOT required; app degrades gracefully.
 try:
@@ -356,7 +334,6 @@ def los_prep(data: pd.DataFrame):
     for c in cat_cols: X[c] = X[c].fillna("Unknown")
     return X, y, num_cols, cat_cols, d
 
-# ---------------- AI WRITER (per section, Exec/Analyst) ----------------
 # ---------------- OpenAI helpers (no hardcoding) ----------------
 def get_openai_client():
     key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
@@ -367,34 +344,24 @@ def get_openai_client():
         st.error("OPENAI_API_KEY looks invalid (must start with 'sk-').")
         return None
     try:
-        from openai import OpenAI
+        from openai import OpenAI  # imported here to avoid import error if package missing
         return OpenAI(api_key=key)
     except Exception as e:
         st.error(f"Could not initialize OpenAI client: {e}")
         return None
 
-
-def choose_model_fallback(client):
-    """
-    Choose a model with graceful fallback:
-    1) Secrets override: PREFERRED_OPENAI_MODEL
-    2) Default cascade: try each until one works
-    """
+def choose_model_fallback():
     preferred = st.secrets.get("PREFERRED_OPENAI_MODEL", "").strip()
-    # You can customize this list. Put the one you expect to have first.
     cascade = [m for m in [
         preferred or None,
-        "gpt-4o",              # widely available on most projects
-        "gpt-4o-mini",         # might be blocked on some projects
-        "o3-mini",             # reasoning-capable small model
-        "gpt-4-turbo",         # legacy but often enabled
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o3-mini",
+        "gpt-4-turbo",
     ] if m]
-
     return cascade
 
-
 def try_chat_completion(client, model, messages, temperature=0.2):
-    """Attempt a single chat call; return (content, error_string_or_None)."""
     try:
         rsp = client.chat.completions.create(
             model=model,
@@ -404,7 +371,6 @@ def try_chat_completion(client, model, messages, temperature=0.2):
         return rsp.choices[0].message.content, None
     except Exception as e:
         return None, str(e)
-
 
 # ---------------- AI WRITER (per section, Exec/Analyst) ----------------
 def ai_write(section_title: str, payload: dict):
@@ -438,7 +404,7 @@ def ai_write(section_title: str, payload: dict):
         chosen_model = None
         last_err = None
 
-        for model in choose_model_fallback(client):
+        for model in choose_model_fallback():
             content, err = try_chat_completion(client, model, messages, temperature=0.2)
             if err is None and content:
                 chosen_model = model
@@ -447,14 +413,12 @@ def ai_write(section_title: str, payload: dict):
                     st.caption(f"Model: `{model}`")
                 break
             else:
-                # If 403 / model not found, keep trying the next one
                 last_err = err
 
         if chosen_model is None:
             st.error("OpenAI call failed on all fallback models.")
             if last_err:
                 st.caption(f"Last error: {last_err}")
-            # fall through to deterministic summary
             use_ai = False
 
     if not use_ai:
@@ -465,7 +429,6 @@ def ai_write(section_title: str, payload: dict):
             "`PREFERRED_OPENAI_MODEL` to a model your project can use. "
             "The app will auto-fallback if a model is blocked."
         )
-
 
 # ---------------- ACTION FOOTER + DECISION LOG ----------------
 if "decision_log" not in st.session_state:
@@ -487,10 +450,10 @@ def action_footer(section: str):
             "sla": f"{sla_date} {sla_time}", "note": note
         })
         st.success("Saved to Decision Log.")
-    if colB.button("Download Decision Log (CSV)"):
+    if colB.button("Prepare CSV for Decision Log"):
         df_log = pd.DataFrame(st.session_state["decision_log"])
         csv = df_log.to_csv(index=False).encode("utf-8")
-        st.download_button("Download CSV", data=csv, file_name="decision_log.csv", mime="text/csv")
+        st.download_button("Download Decision Log CSV", data=csv, file_name="decision_log.csv", mime="text/csv")
 
 # ---------------- NAV ----------------
 tabs = st.tabs(["📈 Admissions Control", "🧾 Revenue Watch", "🛏️ LOS Planner"])
@@ -501,7 +464,10 @@ with tabs[0]:
     # Cohort Explorer
     c1, c2, c3, c4 = st.columns(4)
     cohort_dim = c1.selectbox("Cohort dimension", ["All","hospital","insurer","condition"])
-    cohort_val = c2.selectbox("Cohort value", ["(all)"] + sorted(fdf[cohort_dim].dropna().unique().tolist()) if cohort_dim!="All" and cohort_dim in fdf else ["(all)"])
+    cohort_val = c2.selectbox(
+        "Cohort value",
+        ["(all)"] + (sorted(fdf[cohort_dim].dropna().unique().tolist()) if cohort_dim!="All" and cohort_dim in fdf else []),
+    )
     agg = c3.selectbox("Aggregation", ["Daily","Weekly"], index=0)
     horizon = c4.slider("Forecast horizon (days)", 7, 90, 30)
     freq = "D" if agg=="Daily" else "W"
@@ -539,7 +505,11 @@ with tabs[0]:
         adj_factor = (100 + flu_pct + weather_pct) / 100.0
         fc_adj = {k: v.assign(yhat=v["yhat"] * adj_factor) for k,v in fc.items()}
 
-        plot_ts(ts, fc_adj, f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'} (with scenario)")
+        plot_ts(
+            ts,
+            fc_adj,
+            f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'} (with scenario)"
+        )
 
         # Backtest comparison
         metrics = compare_backtests(ts, horizon=horizon, models=chosen)
@@ -555,13 +525,11 @@ with tabs[0]:
         # Staffing target heuristic (illustrative)
         st.markdown("#### Staffing targets (illustrative heuristic)")
         if fc_adj:
-            # Use the first selected model for targets
             first_model = list(fc_adj.keys())[0]
             daily_fc = fc_adj[first_model]["yhat"].to_numpy()
-            # Heuristic: one RN can safely handle ~5 admissions per 8h shift across the unit (illustrative only)
-            rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)
+            rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)  # illustrative heuristic
             targets = pd.DataFrame({
-                "Date": fc_adj[first_model]["ds"].dt.date,
+                "Date": pd.to_datetime(fc_adj[first_model]["ds"]).dt.date,
                 "Expected Admissions": np.round(daily_fc, 1),
                 "RN/Day": rn_per_shift, "RN/Evening": rn_per_shift, "RN/Night": rn_per_shift
             })
@@ -601,48 +569,47 @@ with tabs[1]:
         an = detect_anomalies(ts_bill, sensitivity)
         plot_anoms(an, "Billing Amount with Anomalies")
 
-        # Root-cause drilldowns (available dims)
-        # Root-cause drilldowns (available dims)
+        # Root-cause drilldowns
         st.markdown("#### Root-cause explorer")
         dims = [d for d in ["insurer","hospital","condition","doctor"] if d in fdf.columns]
         if not dims:
             st.info("No categorical dimensions available for drilldown.")
         else:
             drill = st.selectbox("Group anomalies by", dims, index=0)
-        
-            # recent vs baseline comparison
+
             if isinstance(an, pd.DataFrame) and not an.empty:
                 last_cut = pd.to_datetime(an["ds"]).max()
-                baseline_cut = last_cut - pd.Timedelta(weeks=baseline_weeks)
-        
+                _ = last_cut  # reserved if you later need baseline windowing
+                # Build anomaly-day flags using .dt.date (fix for AttributeError)
                 fdf_agg = fdf.set_index("admit_date")
-                # tagging anomaly days to join
-                # ✅ use .dt.date, not .date
                 an_series = pd.to_datetime(an.loc[an["anomaly"], "ds"])
                 an_days = set(an_series.dt.date.tolist())
-        
-                # ✅ fdf_agg.index is DatetimeIndex; .date returns ndarray of datetime.date
                 fdf_agg["is_anom_day"] = pd.Series(fdf_agg.index.date, index=fdf_agg.index).isin(an_days).astype(int)
-        
+
                 grp = fdf_agg.groupby(drill).agg(
                     billing_total=("billing_amount","sum"),
                     encounters=("billing_amount","count"),
                     anomaly_days=("is_anom_day","sum")
                 ).reset_index().sort_values("anomaly_days", ascending=False)
-        
+
                 st.dataframe(grp, use_container_width=True)
             else:
                 st.info("No anomalies available for drilldown in the current window.")
 
-
-        # Recent anomaly facts
-        recent = an.tail(30); flagged = recent[recent["anomaly"]]
-        with st.expander("Recent anomaly details (last 30 periods)"):
-            if flagged.empty:
-                st.success("No recent anomalies.")
-            else:
-                st.dataframe(flagged[["ds","y","rzs","score"]].rename(columns={"ds":"When","y":"Value"}),
-                             use_container_width=True)
+        # Recent anomaly facts (guarded)
+        if isinstance(an, pd.DataFrame) and not an.empty:
+            recent = an.tail(30)
+            flagged = recent[recent["anomaly"]]
+            with st.expander("Recent anomaly details (last 30 periods)"):
+                if flagged.empty:
+                    st.success("No recent anomalies.")
+                else:
+                    st.dataframe(
+                        flagged[["ds","y","rzs","score"]].rename(columns={"ds":"When","y":"Value"}),
+                        use_container_width=True
+                    )
+        else:
+            st.info("No recent anomalies to display.")
 
     ai_payload = {
         "aggregation": agg,
@@ -651,7 +618,11 @@ with tabs[1]:
         "recent_window": 30,
         "recent_points": int(len(an.tail(30))) if isinstance(an, pd.DataFrame) and not an.empty else 0,
         "recent_anomalies": int(an.tail(30)["anomaly"].sum()) if isinstance(an, pd.DataFrame) and not an.empty else 0,
-        "max_severity_score": float(an.tail(30).loc[an.tail(30)["anomaly"], "score"].max()) if isinstance(an, pd.DataFrame) and not an.empty and an.tail(30)["anomaly"].any() else 0.0
+        "max_severity_score": (
+            float(an.tail(30).loc[an.tail(30)["anomaly"], "score"].max())
+            if isinstance(an, pd.DataFrame) and not an.empty and an.tail(30)["anomaly"].any()
+            else 0.0
+        )
     }
     st.markdown("---")
     ai_write("Revenue Watch", ai_payload)
@@ -667,9 +638,13 @@ with tabs[2]:
     else:
         X, y, num_cols, cat_cols, d_full = prep
         try:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.25, random_state=42, stratify=y
+            )
         except ValueError:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.25, random_state=42
+            )
 
         pre = ColumnTransformer(
             [("num", StandardScaler(), [c for c in num_cols if c in X.columns]),
@@ -739,10 +714,10 @@ with tabs[2]:
 
         # Equity slices (group performance by insurer or age_group)
         st.markdown("#### Equity slices")
-        slice_dim = st.selectbox("Slice by", [d for d in ["insurer","age_group"] if d in d_full.columns], index=0 if "insurer" in d_full else 0)
+        slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
+        slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if "insurer" in slice_dim_options else 0) if slice_dim_options else None
         if slice_dim:
             best_pipe = models[top_model]
-            # Align X_test back to original index to pull slice attribute
             X_test_idx = X_test.index
             slice_vals = d_full.loc[X_test_idx, slice_dim].fillna("Unknown")
             y_pred_best = best_pipe.predict(X_test)
