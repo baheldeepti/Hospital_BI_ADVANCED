@@ -126,7 +126,7 @@ with st.expander("Data source (optional override)"):
     if up is not None:
         try:
             df = pd.read_csv(up)
-            st.success(f"Loaded {len[df):,} rows from upload.")
+            st.success(f"Loaded {len(df):,} rows from upload.")  # <-- fixed here
         except Exception as e:
             st.error(f"Failed to read uploaded CSV: {e}")
 
