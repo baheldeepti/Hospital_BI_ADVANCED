@@ -359,7 +359,7 @@ def los_prep(data: pd.DataFrame):
 # ---------------- AI WRITER (per section, Exec/Analyst) ----------------
 def ai_write(section_title: str, payload: dict):
     # Load key from Secrets (Streamlit Cloud) or environment (local/on-prem)
-    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "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")).strip()
 
     col1, col2 = st.columns([1, 2])
     use_ai = col1.checkbox(
