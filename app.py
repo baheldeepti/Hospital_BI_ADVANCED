@@ -182,11 +182,23 @@ def build_timeseries(data: pd.DataFrame, metric: str, freq: str = "D") -> pd.Dat
         return pd.DataFrame(columns=["ds", "y"])
     return pd.DataFrame({"ds": s.index, "y": s.values})
 
-def ts_metrics(y_true, y_pred) -> Dict[str, float]:
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = mean_squared_error(y_true, y_pred, squared=False)
-    mape = float(np.mean(np.abs((y_true - y_pred) / np.clip(np.abs(y_true), 1e-9, None))) * 100.0)
+def ts_metrics(y_true, y_pred) -> dict:
+    """Return MAE, RMSE, MAPE%. Compatible with older sklearn versions."""
+    y_true = np.asarray(y_true, dtype=float).ravel()
+    y_pred = np.asarray(y_pred, dtype=float).ravel()
+
+    # Align lengths just in case
+    n = min(len(y_true), len(y_pred))
+    y_true = y_true[:n]
+    y_pred = y_pred[:n]
+
+    mae = float(np.mean(np.abs(y_true - y_pred)))
+    rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+    denom = np.clip(np.abs(y_true), 1e-9, None)
+    mape = float(np.mean(np.abs((y_true - y_pred) / denom)) * 100.0)
+
     return {"MAE": mae, "RMSE": rmse, "MAPE%": mape}
+
 
 def backtest_prophet(ts: pd.DataFrame, horizon: int = 14, folds: int = 3):
     if not _HAS_PROPHET: return None
