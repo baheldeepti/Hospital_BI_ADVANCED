@@ -22,6 +22,28 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+from openai import OpenAI
+# --- OpenAI client helper (no hardcoding, validation, graceful fail) ---
+def get_openai_client():
+    from typing import Optional
+    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+    if not key:
+        st.info("OpenAI is disabled (no OPENAI_API_KEY found in Secrets or environment).")
+        return None
+
+    # Minimal sanity check: OpenAI API keys typically start with 'sk-'
+    if not key.startswith("sk-"):
+        st.error("OPENAI_API_KEY is present but looks invalid (should start with 'sk-'). "
+                 "Update your key at https://platform.openai.com/account/api-keys.")
+        return None
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=key)
+        return client
+    except Exception as e:
+        st.error(f"Could not initialize OpenAI client: {e}")
+        return None
 
 # Optional (auto-detected). NOT required; app degrades gracefully.
 try:
@@ -336,40 +358,59 @@ def los_prep(data: pd.DataFrame):
 
 # ---------------- AI WRITER (per section, Exec/Analyst) ----------------
 def ai_write(section_title: str, payload: dict):
-    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
-    col1, col2 = st.columns([1,2])
-    use_ai = col1.checkbox(f"Use AI for {section_title}", value=bool(key), key=f"ai_{section_title}")
+    # Load key from Secrets (Streamlit Cloud) or environment (local/on-prem)
+    key = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+
+    col1, col2 = st.columns([1, 2])
+    use_ai = col1.checkbox(
+        f"Use AI for {section_title}", 
+        value=bool(key and key.startswith("sk-")), 
+        key=f"ai_{section_title}"
+    )
     analyst = col2.toggle("Analyst mode (more detail)", value=False, key=f"ai_mode_{section_title}")
 
-    if use_ai and key:
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=key)
-            prompt = textwrap.dedent(f"""
-            You are a product-analytics writer for a hospital ops platform.
-            Audience: hospital leaders. Tone: crisp, actionable, non-technical.
-            Write a concise {'executive' if not analyst else 'analyst-grade'} narrative for "{section_title}" (140–220 words).
-            Use ONLY this JSON: {json.dumps(payload, default=str)[:6000]}
-            Include:
-              1) What the results imply for operations ("what/so-what/now-what"),
-              2) A short "Performance & Use Case" table,
-              3) 3–5 concrete recommendations (owners and suggested SLAs).
-            """).strip()
-            rsp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role":"system","content":"Be precise, concise, and actionable. Avoid marketing fluff."},
-                          {"role":"user","content": prompt}],
-                temperature=0.2
-            )
-            st.markdown(rsp.choices[0].message.content)
-        except Exception as e:
-            st.error(f"OpenAI call failed: {e}")
+    if use_ai:
+        if not key or not key.startswith("sk-"):
+            st.error("⚠️ Invalid or missing OPENAI_API_KEY. "
+                     "Keys must start with 'sk-'. Update your Secrets or env.")
             use_ai = False
+        else:
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=key)
+
+                prompt = textwrap.dedent(f"""
+                You are a product-analytics writer for a hospital ops platform.
+                Audience: hospital leaders. Tone: crisp, actionable, non-technical.
+                Write a concise {'executive' if not analyst else 'analyst-grade'} narrative 
+                for "{section_title}" (140–220 words).
+                Use ONLY this JSON: {json.dumps(payload, default=str)[:6000]}
+                Include:
+                  1) What the results imply for operations ("what / so-what / now-what"),
+                  2) A short "Performance & Use Case" table,
+                  3) 3–5 concrete recommendations (owners and suggested SLAs).
+                """).strip()
+
+                rsp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Be precise, concise, and actionable. Avoid marketing fluff."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                )
+                st.markdown(rsp.choices[0].message.content)
+
+            except Exception as e:
+                st.error(f"❌ OpenAI call failed: {type(e).__name__} — {e}")
+                use_ai = False
 
     if not use_ai:
         st.markdown(f"**Deterministic summary ({section_title})**")
-        st.write(json.dumps(payload, indent=2, default=str))
-        st.caption("Add OPENAI_API_KEY in Secrets for an executive narrative & recommendations.")
+        st.json(payload)
+        st.caption("ℹ️ Add a valid OPENAI_API_KEY in Streamlit Secrets or your environment "
+                   "to enable AI-generated executive narratives.")
+
 
 # ---------------- ACTION FOOTER + DECISION LOG ----------------
 if "decision_log" not in st.session_state:
