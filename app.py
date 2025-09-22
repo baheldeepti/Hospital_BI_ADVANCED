@@ -250,7 +250,7 @@ class DataQualityMonitor:
         }
 dq = DataQualityMonitor()
 with st.expander("Data Quality Report"):
-st.json(dq.generate_quality_report(df))
+    st.json(dq.generate_quality_report(df))
 #SHARED FILTERS
 def render_filters(data: pd.DataFrame) -> pd.DataFrame:
 st.subheader("Filters")
