@@ -842,6 +842,7 @@ with tabs[1], safe_zone("Revenue Watch"):
     ai_write("Revenue Watch", ai_payload)
     action_footer("Revenue Watch")
 
+
 # ===== 3) LOS Planner (safe_zone) =====
 with tabs[2], safe_zone("LOS Planner"):
     st.subheader("🛏️ LOS Planner — Risk Buckets → Discharge Orchestration")
@@ -851,11 +852,13 @@ with tabs[2], safe_zone("LOS Planner"):
         perf = None
     else:
         X, y, num_cols, cat_cols, d_full, ohe = prep
+
+        # ----- split (robust to class imbalance) -----
         try:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.25, random_state=42, stratify=y
             )
-        except ValueError:
+        except Exception:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.25, random_state=42
             )
@@ -869,83 +872,136 @@ with tabs[2], safe_zone("LOS Planner"):
         )
 
         models = {
-            "Logistic Regression": Pipeline([("pre", pre), ("clf", LogisticRegression(max_iter=600, multi_class="multinomial"))]),
-            "Random Forest": Pipeline([("pre", pre), ("clf", RandomForestClassifier(n_estimators=400, random_state=42))]),
+            "Logistic Regression": Pipeline([
+                ("pre", pre),
+                ("clf", LogisticRegression(max_iter=600, multi_class="multinomial"))
+            ]),
+            "Random Forest": Pipeline([
+                ("pre", pre),
+                ("clf", RandomForestClassifier(n_estimators=400, random_state=42))
+            ]),
         }
         if _HAS_XGB:
-            models["XGBoost (optional)"] = Pipeline([("pre", pre), ("clf", XGBClassifier(
-                n_estimators=500, learning_rate=0.05, max_depth=6, subsample=0.9, colsample_bytree=0.9,
-                objective="multi:softprob", eval_metric="mlogloss", random_state=42
-            ))])
+            models["XGBoost (optional)"] = Pipeline([
+                ("pre", pre),
+                ("clf", XGBClassifier(
+                    n_estimators=500, learning_rate=0.05, max_depth=6,
+                    subsample=0.9, colsample_bytree=0.9,
+                    objective="multi:softprob", eval_metric="mlogloss", random_state=42
+                ))
+            ])
 
-        classes = sorted(y.dropna().unique().tolist())
-        try:
-            y_test_bin = label_binarize(y[y.index.isin(X_test.index)], classes=classes)
-        except Exception:
-            y_test_bin = None
+        # Determine classes present in y_test AFTER the split (for ROC gating)
+        classes_all = sorted(y.dropna().unique().tolist())
+        y_test_unique = pd.Series(y_test).dropna().unique().tolist()
+        n_classes_test = len(y_test_unique)
 
-        results = {}; roc_curves = {}
+        results = {}
+        roc_curves = {}
+
         for name, pipe in models.items():
-            pipe.fit(X_train, y_train)
-            y_pred = pipe.predict(X_test)
             try:
-                y_proba = pipe.predict_proba(X_test)
-            except Exception:
-                y_proba = None
-
-            acc = accuracy_score(y_test, y_pred)
-            pr, rc, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="weighted", zero_division=0)
-            auc = None; fprs={}; tprs={}
-            if (y_test_bin is not None) and (y_proba is not None) and (y_proba.shape[1]==len(classes)):
+                pipe.fit(X_train, y_train)
+                y_pred = pipe.predict(X_test)
                 try:
-                    auc = roc_auc_score(label_binarize(y_test, classes=classes), y_proba, average="weighted", multi_class="ovr")
-                    for i, cls in enumerate(classes):
-                        fpr, tpr, _ = roc_curve(label_binarize(y_test, classes=classes)[:,i], y_proba[:,i])
-                        fprs[cls] = fpr; tprs[cls] = tpr
-                except Exception as e:
-                    logger.warning("roc_calc_failed", error=str(e))
-            results[name] = {"Accuracy":acc, "Precision":pr, "Recall":rc, "F1":f1, "ROC-AUC":auc}
-            roc_curves[name] = (fprs, tprs)
+                    y_proba = pipe.predict_proba(X_test)
+                except Exception:
+                    y_proba = None
+
+                acc = accuracy_score(y_test, y_pred)
+                pr, rc, f1, _ = precision_recall_fscore_support(
+                    y_test, y_pred, average="weighted", zero_division=0
+                )
+
+                # ROC only when we actually have probabilities AND at least 2 classes in test
+                auc = None
+                fprs, tprs = {}, {}
+                if (y_proba is not None) and (n_classes_test >= 2):
+                    try:
+                        y_test_b = label_binarize(y_test, classes=classes_all)
+                        # Align proba shape to classes_all if needed
+                        if y_proba.shape[1] == len(classes_all):
+                            auc = roc_auc_score(y_test_b, y_proba, average="weighted", multi_class="ovr")
+                            for i, cls in enumerate(classes_all):
+                                fpr, tpr, _ = roc_curve(y_test_b[:, i], y_proba[:, i])
+                                fprs[cls] = fpr; tprs[cls] = tpr
+                    except Exception as e:
+                        logger.warning("roc_calc_failed", model=name, error=str(e))
+
+                results[name] = {"Accuracy": acc, "Precision": pr, "Recall": rc, "F1": f1, "ROC-AUC": auc}
+                roc_curves[name] = (fprs, tprs)
+            except Exception as e:
+                logger.warning("model_fit_or_eval_failed", model=name, error=str(e))
+                results[name] = {"Accuracy": np.nan, "Precision": np.nan, "Recall": np.nan, "F1": np.nan, "ROC-AUC": np.nan}
+                roc_curves[name] = ({}, {})
 
         perf = pd.DataFrame(results).T
+        # enforce column order and numeric dtype
         for c in ["Accuracy","Precision","Recall","F1","ROC-AUC"]:
             if c not in perf: perf[c] = np.nan
-        perf = perf[["Accuracy","Precision","Recall","F1","ROC-AUC"]]
+        perf = perf[["Accuracy","Precision","Recall","F1","ROC-AUC"]].apply(pd.to_numeric, errors="coerce")
 
         st.markdown("#### 📊 Model Performance (Classification)")
         st.markdown(style_higher_better(perf), unsafe_allow_html=True)
-        st.caption("Higher is better. Shading ranks performance within each metric (greener = better).")
+        st.caption("Higher is better. Shading ranks within each metric (greener = better).")
 
+        # ----- SAFE top model selection (no crashes on all-NaN) -----
+        priority = ["F1", "Accuracy", "Recall", "Precision"]
+        top_model = None
+        for metric in priority:
+            s = perf[metric]
+            if s.notna().any():
+                top_model = s.idxmax()
+                break
+        if top_model is None:
+            top_model = next(iter(models.keys()))  # fallback to first available
+
+        # ----- ROC plotting (only when valid) -----
         def _render_roc():
-            top_model = perf["F1"].astype(float).idxmax()
-            fprs, tprs = roc_curves[top_model]
+            fprs, tprs = roc_curves.get(top_model, ({}, {}))
+            if (n_classes_test < 2) or (not fprs) or (not tprs):
+                st.info("ROC not available (need ≥2 classes and probability outputs).")
+                return
             fig = go.Figure()
-            for cls in classes:
+            for cls in classes_all:
                 if cls in fprs and cls in tprs and len(fprs[cls]) and len(tprs[cls]):
                     fig.add_trace(go.Scatter(x=fprs[cls], y=tprs[cls], mode="lines", name=f"{top_model} — {cls}"))
             fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Chance", line=dict(dash="dash")))
             fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
             st.plotly_chart(fig, width="stretch")
+
         with st.expander("ROC Curves (one-vs-rest)"):
             _render_roc()
 
+        # ----- Equity slices -----
         st.markdown("#### Equity slices")
         slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
-        slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if slice_dim_options else 0, key="los_slice") if slice_dim_options else None
+        slice_dim = st.selectbox(
+            "Slice by", slice_dim_options,
+            index=0 if slice_dim_options else None, key="los_slice"
+        ) if slice_dim_options else None
+
         if slice_dim:
-            top_model = perf["F1"].astype(float).idxmax()
             best_pipe = models[top_model]
             X_test_idx = X_test.index
             slice_vals = d_full.loc[X_test_idx, slice_dim].fillna("Unknown")
-            y_pred_best = best_pipe.predict(X_test)
-            grp_rows = []
-            for sv in sorted(slice_vals.unique().tolist()):
-                mask = (slice_vals==sv)
-                acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
-                grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
-            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width="stretch")
+            # Predict safely
+            try:
+                y_pred_best = best_pipe.predict(X_test)
+            except Exception as e:
+                logger.warning("best_pipe_predict_failed", error=str(e))
+                y_pred_best = pd.Series(index=y_test.index, dtype=object)
+
+            rows = []
+            for sv in sorted(pd.Series(slice_vals).unique().tolist()):
+                mask = (slice_vals == sv)
+                n = int(mask.sum())
+                acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if n else np.nan
+                rows.append({"Group": str(sv), "Accuracy": acc_g, "N": n})
+            st.dataframe(pd.DataFrame(rows).sort_values("Accuracy", ascending=False), width="stretch")
 
         ai_payload = {
+            "selected_model": top_model,
             "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
             "metrics_table": perf.to_dict(),
             "equity_slice": slice_dim
@@ -953,6 +1009,7 @@ with tabs[2], safe_zone("LOS Planner"):
         st.markdown("---")
         ai_write("LOS Planner", ai_payload)
         action_footer("LOS Planner")
+
 
 # --------------- FOOTER: Decision Log quick peek ---------------
 with st.expander("Decision Log (peek)"):
