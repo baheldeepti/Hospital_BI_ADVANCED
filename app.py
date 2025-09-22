@@ -28,15 +28,36 @@ import gc
 
 # --- Streamlit compatibility shim (handles old width="stretch" usages) ---
 def _safe_plotly_chart(fig, **kwargs):
-    # kill any width=... key and always stretch to container
-    kwargs.pop("width", None)
-    kwargs.setdefault("use_container_width", True)
+    """
+    Streamlit >=1.49: `use_container_width` is deprecated.
+    Normalize to width='stretch' or 'content' and call the real API.
+    """
+    # Read and remove deprecated flag if present
+    ucw = kwargs.pop("use_container_width", None)
+    # Normalize width based on ucw, defaulting to stretch
+    if "width" not in kwargs:
+        if ucw is True:
+            kwargs["width"] = "stretch"
+        elif ucw is False:
+            kwargs["width"] = "content"
+        else:
+            kwargs["width"] = "stretch"
     return st.plotly_chart(fig, **kwargs)
 
 def _safe_dataframe(df, **kwargs):
-    kwargs.pop("width", None)
-    kwargs.setdefault("use_container_width", True)
+    """
+    Same normalization for dataframe/table widgets.
+    """
+    ucw = kwargs.pop("use_container_width", None)
+    if "width" not in kwargs:
+        if ucw is True:
+            kwargs["width"] = "stretch"
+        elif ucw is False:
+            kwargs["width"] = "content"
+        else:
+            kwargs["width"] = "stretch"
     return st.dataframe(df, **kwargs)
+
 
 
 # Add periodic garbage collection
