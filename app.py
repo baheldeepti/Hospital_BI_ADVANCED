@@ -21,7 +21,7 @@ try:
 except Exception:
     _HAS_XGB = False
 
-#System & monitoring
+# System & monitoring
 import psutil
 import structlog
 st.set_page_config(page_title="Hospital Ops Studio — Control Tower", layout="wide", page_icon="🏥")
@@ -63,7 +63,7 @@ with st.sidebar:
     if mem_mb > 1000:
         st.warning("High memory usage. Running GC.")
         gc.collect()
----------------- DATA LAYER ----------------
+# DATA LAYER 
 ICD_MAPPING = {
 'Infections': 'A49.9', 'Flu': 'J10.1', 'Cancer': 'C80.1', 'Asthma': 'J45.909',
 'Heart Disease': 'I51.9', "Alzheimer's": 'G30.9', 'Diabetes': 'E11.9', 'Obesity': 'E66.9'
@@ -218,7 +218,7 @@ df = data_mgr._feature_engineer(df)
 st.success(f"Loaded {len(df):,} rows from upload.")
 except Exception as e:
 st.error(f"Failed to read uploaded CSV: {e}")
----------------- Data Quality Monitor ----------------
+# Data Quality Monitor 
 class DataQualityMonitor:
 def _detect_outliers(self, df: pd.DataFrame) -> Dict[str, int]:
 out = {}
@@ -246,7 +246,7 @@ def generate_quality_report(self, df: pd.DataFrame) -> dict:
 dq = DataQualityMonitor()
 with st.expander("Data Quality Report"):
 st.json(dq.generate_quality_report(df))
----------------- SHARED FILTERS ----------------
+#SHARED FILTERS
 def render_filters(data: pd.DataFrame) -> pd.DataFrame:
 st.subheader("Filters")
 c1, c2, c3, c4 = st.columns(4)
@@ -261,7 +261,7 @@ if adm and "admission_type" in data: q &= data["admission_type"].isin(adm)
 if cond and "condition" in data: q &= data["condition"].isin(cond)
 return data[q].copy()
 fdf = render_filters(df)
----------------- UTIL: SERIES + METRICS ----------------
+# UTIL: SERIES + METRICS 
 def build_timeseries(data: pd.DataFrame, metric: str, freq: str = "D") -> pd.DataFrame:
 if "admit_date" not in data or data.empty:
 return pd.DataFrame(columns=["ds","y"])
@@ -311,7 +311,7 @@ styled = df.style.format("{:.3f}")
 for col in df.columns:
 styled = styled.apply(lambda s: [bg(col, s.name) for _ in s], axis=1)
 return styled.to_html()
----------------- Model Manager (async-ready + cache) ----------------
+#Model Manager (async-ready + cache) 
 class ModelManager:
 def init(self):
 self.executor = ThreadPoolExecutor(max_workers=2)
@@ -350,7 +350,7 @@ async def run_async(self, fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(self.executor, lambda: fn(*args, **kwargs))
 model_mgr = ModelManager()
----------------- ANOMALY DETECTION ----------------
+#ANOMALY DETECTION 
 def detect_anomalies(ts: pd.DataFrame, sensitivity: float = 3.0) -> pd.DataFrame:
 if ts.empty: return ts.assign(anomaly=False, score=0.0)
 df2 = ts.copy().sort_values("ds"); y = df2["y"].values
@@ -376,7 +376,7 @@ fig.add_trace(go.Scatter(x=flag["ds"], y=flag["y"], mode="markers", name="Anomal
 marker=dict(size=10, symbol="x")))
 fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
 st.plotly_chart(fig, use_container_width=True)
----------------- LOS HELPERS ----------------
+# LOS HELPERS 
 def los_bucket(days: float) -> str:
 if pd.isna(days): return np.nan
 d = float(days)
@@ -401,7 +401,7 @@ for c in cat_cols:
 X = d[num_cols + cat_cols].copy()
 y = d["los_bucket"].copy()
 return X, y, num_cols, cat_cols, d
----------------- Circuit Breaker for External APIs ----------------
+# Circuit Breaker for External APIs
 class CircuitBreaker:
 def init(self, failure_threshold=3, timeout=60):
 self.failure_threshold = failure_threshold
@@ -429,8 +429,7 @@ def call(self, func, *args, **kwargs):
         raise e
 if "cb_ai" not in st.session_state:
 st.session_state["cb_ai"] = CircuitBreaker(failure_threshold=3, timeout=90)
----------------- AI (single model, robust) ----------------
-AI_MODEL = (st.secrets.get("OPENAI_MODEL")
+#AI_MODEL -- (st.secrets.get("OPENAI_MODEL")
 or os.environ.get("OPENAI_MODEL")
 or "gpt-4o-mini").strip()
 def _get_openai_client():
@@ -487,7 +486,7 @@ Copyif use_ai and client:
 st.markdown(f"**Deterministic summary ({section_title})**")
 st.json(payload)
 st.caption("ℹ️ To enable AI narratives, set OPENAI_API_KEY and OPENAI_MODEL in Secrets.")
----------------- SAFETY WRAPPER ----------------
+#SAFETY WRAPPER 
 from contextlib import contextmanager
 @contextmanager
 def safe_zone(label: str):
@@ -497,7 +496,7 @@ except Exception as e:
 logger.error("section_error", section=label, error=str(e))
 st.error(f"{label}: something went wrong.")
 st.exception(e)
----------------- ACTION FOOTER + DECISION LOG ----------------
+# ACTION FOOTER + DECISION LOG 
 if "decision_log" not in st.session_state:
 st.session_state["decision_log"] = []
 def action_footer(section: str):
@@ -526,7 +525,7 @@ st.download_button(
     file_name="decision_log.csv", mime="text/csv",
     key=f"dl_{section}"
 )
----------------- Progressive UI ----------------
+# Progressive UI
 class ProgressiveUI:
 @staticmethod
 def lazy_component(component_name: str, load_func):
@@ -538,7 +537,7 @@ return load_func()
 else:
 st.info(f"Click to load {component_name}")
 return None
----------------- NAV ----------------
+# NAV 
 tabs = st.tabs(["📈 Admissions Control", "🧾 Revenue Watch", "🛏️ LOS Planner"])
 
 with tabs[0], safe_zone("Admissions Control"):
@@ -813,7 +812,7 @@ Copy    pre = ColumnTransformer(
     st.markdown("---")
     ai_write("LOS Planner", ai_payload)
     action_footer("LOS Planner")
---------------- FOOTER: Decision Log quick peek ---------------
+# FOOTER: Decision Log quick peek ---------------
 with st.expander("Decision Log (peek)"):
 df_log = pd.DataFrame(st.session_state["decision_log"])
 if df_log.empty:
