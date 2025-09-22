@@ -24,6 +24,11 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder, label_binarize
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score, roc_curve
+import gc
+# Add periodic garbage collection
+if st.button("Clear Cache & GC"):
+    st.cache_data.clear()
+    gc.collect()
 
 # Optional extras — degrade gracefully if missing
 try:
