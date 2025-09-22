@@ -205,10 +205,7 @@ class HospitalDataManager:
             st.error(f"Data load failed. Using fallback dataset. Details: {e}")
             return self._get_fallback_data()
 
-# Tell Streamlit how to hash the instance for caching
-st.runtime.caching.hashing._CodeHasher.hash_funcs.update({  # type: ignore[attr-defined]
-    HospitalDataManager: lambda _: b"HospitalDataManager_v1",
-})
+
 
 data_mgr = HospitalDataManager()
 df = data_mgr.load_data_chunked(RAW_URL)
