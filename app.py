@@ -68,21 +68,23 @@ ICD_MAPPING = {
 'Infections': 'A49.9', 'Flu': 'J10.1', 'Cancer': 'C80.1', 'Asthma': 'J45.909',
 'Heart Disease': 'I51.9', "Alzheimer's": 'G30.9', 'Diabetes': 'E11.9', 'Obesity': 'E66.9'
 }
+
 class HospitalDataManager:
-"""Chunked loader with schema normalization + simple validation."""
-BASE_SCHEMA = {
-'admit_date': 'datetime64[ns]',
-'discharge_date': 'datetime64[ns]',
-'billing_amount': 'float64',
-'length_of_stay': 'float64',
-'condition': 'string',
-'admission_type': 'string',
-'insurer': 'string',
-'hospital': 'string',
-'doctor': 'string',
-'test_results': 'string',
-'age': 'float64',
-}
+    """Chunked loader with schema normalization + simple validation."""
+    BASE_SCHEMA = {
+        'admit_date': 'datetime64[ns]',
+        'discharge_date': 'datetime64[ns]',
+        'billing_amount': 'float64',
+        'length_of_stay': 'float64',
+        'condition': 'string',
+        'admission_type': 'string',
+        'insurer': 'string',
+        'hospital': 'string',
+        'doctor': 'string',
+        'test_results': 'string',
+        'age': 'float64',
+    }
+    # ... rest of class content with proper indentation
 RENAME_MAP = {
 "Billing Amount": "billing_amount",
 "Date of Admission": "admit_date",
