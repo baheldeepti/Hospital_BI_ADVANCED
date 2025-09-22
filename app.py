@@ -43,7 +43,7 @@ structlog.configure(
 )
 logger = structlog.get_logger()
 
-# ----------------- Styles -----------------------
+# ----------------- Styles (includes sticky tab bar) -----------------------
 st.markdown("""
 <style>
 :root{
@@ -60,6 +60,11 @@ a {color:var(--teal)}
 .badge-alert{background:rgba(239,68,68,.12)}
 .small{color:var(--sub);font-size:0.9rem}
 hr{border-top:1px solid #eee}
+/* make the tab labels look like a top nav and keep them visible */
+.stTabs [data-baseweb="tab-list"]{
+  position: sticky; top: 0; z-index: 3; background: white; border-bottom: 1px solid #eee; margin-top: .25rem;
+}
+.stTabs [data-baseweb="tab"]{font-weight:600}
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,7 +76,6 @@ with st.sidebar:
     st.header("Settings")
     AI_TOGGLE = st.toggle("Enable AI narratives", value=True, key="ai_toggle")
     st.caption("Tip: configure OPENAI_API_KEY and OPENAI_MODEL in Secrets.")
-    # Resource monitor
     process = psutil.Process()
     mem_mb = process.memory_info().rss / 1024 / 1024
     st.metric("Memory (MB)", f"{mem_mb:.1f}")
@@ -157,7 +161,6 @@ class HospitalDataManager:
         return df
 
     def _validate_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
-        # Basic validation — drop rows without admit_date and clip impossible values
         chunk = chunk.dropna(subset=["admit_date"])
         if "length_of_stay" in chunk:
             chunk["length_of_stay"] = chunk["length_of_stay"].clip(lower=0, upper=365)
@@ -166,7 +169,6 @@ class HospitalDataManager:
         return chunk
 
     def _get_fallback_data(self) -> pd.DataFrame:
-        # Minimal synthetic fallback to keep the app operational
         dates = pd.date_range(end=pd.Timestamp.today(), periods=60, freq="D")
         df = pd.DataFrame({
             "admit_date": dates,
@@ -182,16 +184,9 @@ class HospitalDataManager:
         df = self._coerce_types(self._feature_engineer(df))
         return df
 
-    # 🔧 FIX for UnhashableParamError: don't hash `self` (the instance)
-    @st.cache_data(
-        ttl=3600, max_entries=3, show_spinner=False,
-        hash_funcs={type: lambda x: "HospitalDataManager_v1"}  # overwritten just below in __post_init__
-    )
+    # --- Cache: ignore `self` to avoid UnhashableParamError
+    @st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
     def load_data_chunked(self, url: str, chunk_size: int = 10000) -> pd.DataFrame:
-        """
-        Load CSV in chunks, normalize schema, coerce types, validate and feature-engineer.
-        Cached for 1 hour. Cache key includes URL and chunk size; the `self` instance is ignored.
-        """
         try:
             chunks = []
             for chunk in pd.read_csv(url, chunksize=chunk_size):
@@ -210,11 +205,10 @@ class HospitalDataManager:
             st.error(f"Data load failed. Using fallback dataset. Details: {e}")
             return self._get_fallback_data()
 
-# Streamlit needs the real class object in hash_funcs; update it post-class-definition
-HospitalDataManager.load_data_chunked = st.cache_data(
-    ttl=3600, max_entries=3, show_spinner=False,
-    hash_funcs={HospitalDataManager: lambda _: "HospitalDataManager_v1"},
-)(HospitalDataManager.load_data_chunked.__wrapped__)  # type: ignore
+# Tell Streamlit how to hash the instance for caching
+st.runtime.caching.hashing._CodeHasher.hash_funcs.update({  # type: ignore[attr-defined]
+    HospitalDataManager: lambda _: b"HospitalDataManager_v1",
+})
 
 data_mgr = HospitalDataManager()
 df = data_mgr.load_data_chunked(RAW_URL)
@@ -340,19 +334,6 @@ class ModelManager:
     def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=2)
 
-    def _hash_series(self, ts_df: pd.DataFrame, horizon: int) -> str:
-        h = hashlib.md5()
-        h.update(np.asarray(ts_df["y"]).tobytes())
-        h.update(str(ts_df["ds"].min()).encode())
-        h.update(str(ts_df["ds"].max()).encode())
-        h.update(str(horizon).encode())
-        return h.hexdigest()
-
-    @st.cache_resource(show_spinner=False)
-    def cached_forecast(self, y_bytes: bytes, start: str, end: str, horizon: int) -> pd.DataFrame:
-        fc_idx = pd.date_range(pd.to_datetime(end) + pd.Timedelta(days=1), periods=horizon, freq="D")
-        return pd.DataFrame({"ds": fc_idx, "yhat": np.zeros(horizon)})
-
     def _holt_forecast(self, s: pd.Series, horizon: int) -> np.ndarray:
         try:
             m = ExponentialSmoothing(s, trend="add", seasonal="add", seasonal_periods=7).fit()
@@ -398,7 +379,7 @@ def plot_anoms(an_df: pd.DataFrame, title: str):
         fig.add_trace(go.Scatter(x=flag["ds"], y=flag["y"], mode="markers", name="Anomaly",
                                  marker=dict(size=10, symbol="x")))
     fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")  # ← new API
 
 # ---------------- LOS HELPERS ----------------
 def los_bucket(days: float) -> str:
@@ -414,7 +395,6 @@ def los_prep(data: pd.DataFrame):
     d = data.dropna(subset=["length_of_stay"]).copy()
     d["los_bucket"] = d["length_of_stay"].apply(los_bucket)
 
-    # Numeric columns
     num_cols = [c for c in ["age","billing_amount","length_of_stay","dow","month","is_emergency"] if c in d.columns]
     for c in num_cols:
         d[c] = pd.to_numeric(d[c], errors="coerce").fillna(d[c].median())
@@ -465,9 +445,12 @@ if "cb_ai" not in st.session_state:
     st.session_state["cb_ai"] = CircuitBreaker(failure_threshold=3, timeout=90)
 
 # ---------------- AI (single model, robust) ----------------
-AI_MODEL = (st.secrets.get("OPENAI_MODEL")
-            or os.environ.get("OPENAI_MODEL")
-            or "gpt-4o-mini").strip()
+# Allow-list & fallback to avoid 403 model errors
+_ALLOWED_MODELS = [
+    os.environ.get("OPENAI_MODEL", "").strip() or st.secrets.get("OPENAI_MODEL", "") or "",
+    "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "gpt-3.5-turbo"
+]
+AI_MODEL = next((m for m in _ALLOWED_MODELS if m), "gpt-3.5-turbo")
 
 def _get_openai_client():
     key = (
@@ -479,10 +462,21 @@ def _get_openai_client():
         return None
     try:
         from openai import OpenAI
-        return OpenAI(api_key=key)  # no proxies/extra kwargs
+        return OpenAI(api_key=key)
     except Exception as e:
         logger.error("openai_init_failed", error=str(e))
         return None
+
+def _try_completion(client, model, prompt):
+    return st.session_state["cb_ai"].call(
+        client.chat.completions.create,
+        model=model,
+        messages=[
+            {"role": "system", "content": "Be precise, concise, and actionable. Avoid marketing fluff."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.2,
+    )
 
 def ai_write(section_title: str, payload: dict):
     client = _get_openai_client()
@@ -502,24 +496,20 @@ def ai_write(section_title: str, payload: dict):
           2) A short "Performance & Use Case" table,
           3) 3–5 concrete recommendations (owners and suggested SLAs).
         """).strip()
-        try:
-            rsp = st.session_state["cb_ai"].call(
-                client.chat.completions.create,
-                model=AI_MODEL,
-                messages=[
-                    {"role": "system", "content": "Be precise, concise, and actionable. Avoid marketing fluff."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-            )
-            st.markdown(rsp.choices[0].message.content)
-            with st.expander("AI diagnostics", expanded=False):
-                st.caption(f"Model: `{AI_MODEL}`")
-            return
-        except Exception as e:
-            logger.warning("ai_call_failed", error=str(e))
-            with st.expander("AI unavailable (showing deterministic summary)", expanded=False):
-                st.caption(f"{type(e).__name__}: {e}")
+        # Try the chosen model, then fall back through the allow-list
+        tried = []
+        for mdl in [AI_MODEL] + [m for m in _ALLOWED_MODELS if m and m != AI_MODEL]:
+            try:
+                rsp = _try_completion(client, mdl, prompt)
+                st.markdown(rsp.choices[0].message.content)
+                with st.expander("AI diagnostics", expanded=False):
+                    st.caption(f"Model: `{mdl}`")
+                return
+            except Exception as e:
+                tried.append((mdl, str(e)))
+                logger.warning("ai_call_failed", error=str(e))
+        with st.expander("AI unavailable (showing deterministic summary)"):
+            st.caption("Tried models: " + " → ".join([m for m,_ in tried]))
 
     # Deterministic fallback
     st.markdown(f"**Deterministic summary ({section_title})**")
@@ -607,7 +597,6 @@ with tabs[0], safe_zone("Admissions Control"):
     if ts.empty:
         st.info("No admissions series for the current cohort/filters.")
     else:
-        # Progressive loading for heavy calendar
         def _render_calendar():
             s = fdx.set_index("admit_date").assign(_one=1)["_one"].resample("D").sum().fillna(0.0)
             cal = pd.DataFrame({"dow": s.index.weekday, "woy": s.index.isocalendar().week.values, "val": s.values})
@@ -615,7 +604,7 @@ with tabs[0], safe_zone("Admissions Control"):
             heat_pivot = heat.pivot(index="woy", columns="dow", values="val").fillna(0)
             fig = px.imshow(heat_pivot, aspect="auto", labels=dict(x="Weekday (0=Mon)", y="Week of Year", color="Avg admits"))
             fig.update_layout(height=360, margin=dict(l=10,r=10,b=10,t=30))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         with st.expander("Seasonality calendar (avg admissions by week-of-year × weekday)"):
             ProgressiveUI.lazy_component("Seasonality Calendar", _render_calendar)
 
@@ -623,20 +612,18 @@ with tabs[0], safe_zone("Admissions Control"):
         flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5, key="adm_flu")
         weather_pct = sc2.slider("Weather impact (±%)", -20, 20, 0, 5, key="adm_wthr")
 
-        # Single scalable forecast (Holt-Winters) — run via cached/async manager
         fc = model_mgr.forecast_one(ts, horizon=horizon)
         adj_factor = (100 + flu_pct + weather_pct) / 100.0
         fc_adj = fc.assign(yhat=fc["yhat"] * adj_factor)
 
-        # Plot
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=ts["ds"], y=ts["y"], name="History", mode="lines"))
         fig.add_trace(go.Scatter(x=fc_adj["ds"], y=fc_adj["yhat"], name="Holt-Winters (adj.)", mode="lines"))
         fig.update_layout(title=f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'}",
                           height=420, margin=dict(l=10,r=10,b=10,t=50))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
-        # Backtest (simple rolling) for transparency
+        # Backtest (simple rolling)
         try:
             s = ts.set_index("ds")["y"].asfreq("D").ffill()
             H = min(14, horizon)
@@ -655,7 +642,6 @@ with tabs[0], safe_zone("Admissions Control"):
         except Exception as e:
             logger.warning("backtest_failed", error=str(e))
 
-        # Staffing targets (illustrative)
         st.markdown("#### Staffing targets (illustrative heuristic)")
         daily_fc = fc_adj["yhat"].to_numpy()
         rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)
@@ -664,9 +650,8 @@ with tabs[0], safe_zone("Admissions Control"):
             "Expected Admissions": np.round(daily_fc, 1),
             "RN/Day": rn_per_shift, "RN/Evening": rn_per_shift, "RN/Night": rn_per_shift
         })
-        st.dataframe(targets, use_container_width=True, hide_index=True)
+        st.dataframe(targets, width="stretch", hide_index=True)
 
-        # AI narrative
         ai_payload = {
             "cohort": {"dimension": cohort_dim, "value": cohort_val},
             "aggregation": agg,
@@ -714,7 +699,7 @@ with tabs[1], safe_zone("Revenue Watch"):
                     anomaly_days=("is_anom_day","sum")
                 ).reset_index().sort_values("anomaly_days", ascending=False)
 
-                st.dataframe(grp, use_container_width=True)
+                st.dataframe(grp, width="stretch")
             else:
                 st.info("No anomalies available for drilldown in the current window.")
 
@@ -727,7 +712,7 @@ with tabs[1], safe_zone("Revenue Watch"):
                 else:
                     st.dataframe(
                         flagged[["ds","y","rzs","score"]].rename(columns={"ds":"When","y":"Value"}),
-                        use_container_width=True
+                        width="stretch"
                     )
         else:
             st.info("No recent anomalies to display.")
@@ -823,7 +808,6 @@ with tabs[2], safe_zone("LOS Planner"):
         st.markdown(style_higher_better(perf), unsafe_allow_html=True)
         st.caption("Higher is better. Green → Red indicates rank per metric.")
 
-        # Progressive loading for ROC (can be heavy)
         def _render_roc():
             top_model = perf["F1"].astype(float).idxmax()
             fprs, tprs = roc_curves[top_model]
@@ -833,16 +817,14 @@ with tabs[2], safe_zone("LOS Planner"):
                     fig.add_trace(go.Scatter(x=fprs[cls], y=tprs[cls], mode="lines", name=f"{top_model} — {cls}"))
             fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Chance", line=dict(dash="dash")))
             fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         with st.expander("ROC Curves (one-vs-rest)"):
             ProgressiveUI.lazy_component("ROC Curves", _render_roc)
 
-        # Equity slices
         st.markdown("#### Equity slices")
         slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
         slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if "insurer" in slice_dim_options else 0, key="los_slice") if slice_dim_options else None
         if slice_dim:
-            # Choose best model by F1
             top_model = perf["F1"].astype(float).idxmax()
             best_pipe = models[top_model]
             X_test_idx = X_test.index
@@ -853,7 +835,7 @@ with tabs[2], safe_zone("LOS Planner"):
                 mask = (slice_vals==sv)
                 acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
                 grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
-            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), use_container_width=True)
+            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width="stretch")
 
         ai_payload = {
             "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
@@ -870,7 +852,7 @@ with st.expander("Decision Log (peek)"):
     if df_log.empty:
         st.info("No decisions logged yet.")
     else:
-        st.dataframe(df_log, use_container_width=True)
+        st.dataframe(df_log, width="stretch")
         st.download_button(
             label="Download Decision Log (CSV)",
             data=df_log.to_csv(index=False).encode("utf-8"),
