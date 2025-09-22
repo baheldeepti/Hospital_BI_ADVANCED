@@ -25,6 +25,19 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score, roc_curve
 import gc
+
+# --- Streamlit compatibility shim (handles old width="stretch" usages) ---
+def _safe_plotly_chart(fig, **kwargs):
+    # kill any width=... key and always stretch to container
+    kwargs.pop("width", None)
+    kwargs.setdefault("use_container_width", True)
+    return st.plotly_chart(fig, **kwargs)
+
+def _safe_dataframe(df, **kwargs):
+    kwargs.pop("width", None)
+    kwargs.setdefault("use_container_width", True)
+    return st.dataframe(df, **kwargs)
+
 # Add periodic garbage collection
 if st.button("Clear Cache & GC"):
     st.cache_data.clear()
