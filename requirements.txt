@@ -6,3 +6,5 @@ scikit-learn==1.5.2
 statsmodels==0.14.2
 openai>=1.51.0
 xgboost==2.1.1
+psutil==6.0.0
+structlog==24.1.0
