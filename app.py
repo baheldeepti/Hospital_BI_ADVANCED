@@ -34,7 +34,7 @@ def ensure_pkg(pkg: str, spec: str | None = None):
             st.error(f"Package '{pkg}' is missing and no spec provided to install.")
             st.stop()
 
-# Try to import Plotly, or install it then import
+# Ensure Plotly; remove this block once your deploy is installing requirements properly.
 ensure_pkg("plotly", "plotly==5.22.0")
 import plotly.graph_objects as go
 import plotly.express as px
@@ -122,14 +122,18 @@ def load_data(url: str = RAW_URL) -> pd.DataFrame:
         "Test Results": "test_results",
         "Age": "age",
     }
-    for k,v in rename_map.items():
-        if k in df.columns: df.rename(columns={k:v}, inplace=True)
+    for k, v in rename_map.items():
+        if k in df.columns:
+            df.rename(columns={k: v}, inplace=True)
 
     # Types
-    if "admit_date" in df: df["admit_date"] = pd.to_datetime(df["admit_date"], errors="coerce")
-    if "discharge_date" in df: df["discharge_date"] = pd.to_datetime(df["discharge_date"], errors="coerce")
-    for c in ["length_of_stay","billing_amount","age"]:
-        if c in df: df[c] = pd.to_numeric(df[c], errors="coerce")
+    if "admit_date" in df:
+        df["admit_date"] = pd.to_datetime(df["admit_date"], errors="coerce")
+    if "discharge_date" in df:
+        df["discharge_date"] = pd.to_datetime(df["discharge_date"], errors="coerce")
+    for c in ["length_of_stay", "billing_amount", "age"]:
+        if c in df:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
     df = df.dropna(subset=["admit_date"]).copy()
 
@@ -171,17 +175,22 @@ def render_filters(data: pd.DataFrame) -> pd.DataFrame:
     adm = c3.multiselect("Admission Types", sorted(data["admission_type"].dropna().unique()) if "admission_type" in data else [])
     cond = c4.multiselect("Conditions", sorted(data["condition"].dropna().unique()) if "condition" in data else [])
     q = pd.Series(True, index=data.index)
-    if hosp and "hospital" in data: q &= data["hospital"].isin(hosp)
-    if insurer and "insurer" in data: q &= data["insurer"].isin(insurer)
-    if adm and "admission_type" in data: q &= data["admission_type"].isin(adm)
-    if cond and "condition" in data: q &= data["condition"].isin(cond)
+    if hosp and "hospital" in data:
+        q &= data["hospital"].isin(hosp)
+    if insurer and "insurer" in data:
+        q &= data["insurer"].isin(insurer)
+    if adm and "admission_type" in data:
+        q &= data["admission_type"].isin(adm)
+    if cond and "condition" in data:
+        q &= data["condition"].isin(cond)
     return data[q].copy()
 
 fdf = render_filters(df)
 
 # ---------------- UTIL: SERIES + METRICS ----------------
 def build_timeseries(data: pd.DataFrame, metric: str, freq: str = "D") -> pd.DataFrame:
-    if "admit_date" not in data: return pd.DataFrame(columns=["ds","y"])
+    if "admit_date" not in data:
+        return pd.DataFrame(columns=["ds", "y"])
     idx = data.set_index("admit_date")
     if metric == "intake":
         s = idx.assign(_one=1)["_one"].resample(freq).sum().fillna(0.0)
@@ -190,7 +199,7 @@ def build_timeseries(data: pd.DataFrame, metric: str, freq: str = "D") -> pd.Dat
     elif metric == "length_of_stay" and "length_of_stay" in idx:
         s = idx["length_of_stay"].resample(freq).mean().fillna(method="ffill").fillna(0.0)
     else:
-        return pd.DataFrame(columns=["ds","y"])
+        return pd.DataFrame(columns=["ds", "y"])
     return pd.DataFrame({"ds": s.index, "y": s.values})
 
 def ts_metrics(y_true, y_pred) -> dict:
@@ -199,20 +208,21 @@ def ts_metrics(y_true, y_pred) -> dict:
     n = min(len(y_true), len(y_pred))
     y_true = y_true[:n]; y_pred = y_pred[:n]
     mae = float(np.mean(np.abs(y_true - y_pred)))
-    rmse = float(np.sqrt(np.mean((y_true - y_pred)**2)))
+    rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
     denom = np.clip(np.abs(y_true), 1e-9, None)
-    mape = float(np.mean(np.abs((y_true - y_pred)/denom))*100.0)
+    mape = float(np.mean(np.abs((y_true - y_pred) / denom)) * 100.0)
     return {"MAPE%": mape, "MAE": mae, "RMSE": rmse}
 
 def style_lower_better(df: pd.DataFrame) -> str:
     ranks = df.rank(ascending=True, method="min")
     def bg(col, row):
         r = ranks.loc[row, col]; rmin, rmax = ranks[col].min(), ranks[col].max()
-        if rmax == rmin: return "background-color: rgba(255,255,255,0.6)"
-        pct = (r - rmin)/(rmax - rmin + 1e-9)
-        red = int(255*pct); green = int(255*(1-pct)); blue = 200
+        if rmax == rmin:
+            return "background-color: rgba(255,255,255,0.6)"
+        pct = (r - rmin) / (rmax - rmin + 1e-9)
+        red = int(255 * pct); green = int(255 * (1 - pct)); blue = 200
         return f"background-color: rgba({red},{green},{blue},0.25)"
-    styled = df.style.format({"MAPE%":"{:.2f}","MAE":"{:.2f}","RMSE":"{:.2f}"})
+    styled = df.style.format({"MAPE%": "{:.2f}", "MAE": "{:.2f}", "RMSE": "{:.2f}"})
     for col in df.columns:
         styled = styled.apply(lambda s: [bg(col, s.name) for _ in s], axis=1)
     return styled.to_html()
@@ -221,9 +231,10 @@ def style_higher_better(df: pd.DataFrame) -> str:
     ranks = df.rank(ascending=False, method="min")
     def bg(col, row):
         r = ranks.loc[row, col]; rmin, rmax = ranks[col].min(), ranks[col].max()
-        if rmax == rmin: return "background-color: rgba(255,255,255,0.6)"
-        pct = (r - rmin)/(rmax - rmin + 1e-9)
-        red = int(255*pct); green = int(255*(1-pct)); blue = 200
+        if rmax == rmin:
+            return "background-color: rgba(255,255,255,0.6)"
+        pct = (r - rmin) / (rmax - rmin + 1e-9)
+        red = int(255 * pct); green = int(255 * (1 - pct)); blue = 200
         return f"background-color: rgba({red},{green},{blue},0.25)"
     styled = df.style.format("{:.3f}")
     for col in df.columns:
@@ -239,24 +250,30 @@ def _holt(train: pd.Series, horizon: int):
     return m.forecast(horizon)
 
 def _sarimax(train: pd.Series, horizon: int):
-    model = SARIMAX(train, order=(1,1,1), seasonal_order=(1,1,1,7),
-                    enforce_stationarity=False, enforce_invertibility=False).fit(disp=False)
+    model = SARIMAX(
+        train,
+        order=(1, 1, 1),
+        seasonal_order=(1, 1, 1, 7),
+        enforce_stationarity=False,
+        enforce_invertibility=False
+    ).fit(disp=False)
     return model.forecast(steps=horizon)
 
 def backtest_series(s: pd.Series, horizon: int, folds: int, model_name: str):
     preds, trues = [], []
-    if len(s) < (folds+1)*horizon + 10: return None
-    for i in range(folds,0,-1):
-        split = len(s) - i*horizon
-        train = s.iloc[:split]; test = s.iloc[split:split+horizon]
+    if len(s) < (folds + 1) * horizon + 10:
+        return None
+    for i in range(folds, 0, -1):
+        split = len(s) - i * horizon
+        train = s.iloc[:split]; test = s.iloc[split:split + horizon]
         try:
             if model_name == "Holt-Winters":
                 fc = _holt(train, horizon)
             elif model_name == "ARIMA (SARIMAX)":
                 fc = _sarimax(train, horizon)
             elif model_name == "Prophet" and _HAS_PROPHET:
-                dfp = train.reset_index().rename(columns={"index":"ds", train.name:"y"})
-                dfp.columns = ["ds","y"]
+                dfp = train.reset_index().rename(columns={"index": "ds", train.name: "y"})
+                dfp.columns = ["ds", "y"]
                 m = Prophet(weekly_seasonality=True, daily_seasonality=True, yearly_seasonality=True)
                 m.fit(dfp)
                 future = m.make_future_dataframe(periods=horizon, freq="D")
@@ -275,22 +292,26 @@ def run_forecasts(ts: pd.DataFrame, horizon: int, models: List[str]) -> Dict[str
         try:
             if name == "Holt-Winters":
                 fc = _holt(s, horizon)
-                out[name] = pd.DataFrame({"ds": pd.date_range(s.index.max()+pd.Timedelta(days=1), periods=horizon, freq="D"),
-                                          "yhat": np.asarray(fc)})
+                out[name] = pd.DataFrame({
+                    "ds": pd.date_range(s.index.max() + pd.Timedelta(days=1), periods=horizon, freq="D"),
+                    "yhat": np.asarray(fc)
+                })
             elif name == "ARIMA (SARIMAX)":
                 fc = _sarimax(s, horizon)
-                out[name] = pd.DataFrame({"ds": pd.date_range(s.index.max()+pd.Timedelta(days=1), periods=horizon, freq="D"),
-                                          "yhat": np.asarray(fc)})
+                out[name] = pd.DataFrame({
+                    "ds": pd.date_range(s.index.max() + pd.Timedelta(days=1), periods=horizon, freq="D"),
+                    "yhat": np.asarray(fc)
+                })
             elif name == "Prophet" and _HAS_PROPHET:
                 m = Prophet(weekly_seasonality=True, daily_seasonality=True, yearly_seasonality=True)
-                m.fit(ts.rename(columns={"ds":"ds","y":"y"}))
+                m.fit(ts.rename(columns={"ds": "ds", "y": "y"}))
                 future = m.make_future_dataframe(periods=horizon, freq="D")
-                out[name] = m.predict(future).tail(horizon)[["ds","yhat"]]
+                out[name] = m.predict(future).tail(horizon)[["ds", "yhat"]]
         except Exception:
             pass
     return out
 
-def compare_backtests(ts: pd.DataFrame, horizon: int, models: List[str]) -> Dict[str, Dict[str,float]]:
+def compare_backtests(ts: pd.DataFrame, horizon: int, models: List[str]) -> Dict[str, Dict[str, float]]:
     s = ts.set_index("ds")["y"].asfreq("D").fillna(method="ffill")
     metrics = {}
     H = min(14, horizon)
@@ -307,19 +328,20 @@ def plot_ts(history: pd.DataFrame, forecasts: Dict[str, pd.DataFrame], title: st
         fig.add_trace(go.Scatter(x=history["ds"], y=history["y"], name="History", mode="lines"))
     for name, dfp in forecasts.items():
         fig.add_trace(go.Scatter(x=dfp["ds"], y=dfp["yhat"], name=name, mode="lines"))
-    fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
+    fig.update_layout(title=title, height=420, margin=dict(l=10, r=10, b=10, t=50))
     st.plotly_chart(fig, use_container_width=True)
 
 # ---------------- ANOMALY DETECTION (Billing) ----------------
 def detect_anomalies(ts: pd.DataFrame, sensitivity: float = 3.0) -> pd.DataFrame:
-    if ts.empty: return ts.assign(anomaly=False, score=0.0)
+    if ts.empty:
+        return ts.assign(anomaly=False, score=0.0)
     df = ts.copy().sort_values("ds"); y = df["y"].values
     med = np.median(y); mad = np.median(np.abs(y - med)) + 1e-9
     rzs = 0.6745 * (y - med) / mad
     z_flag = np.abs(rzs) > sensitivity
     try:
         iso = IsolationForest(n_estimators=300, contamination="auto", random_state=42)
-        iso_flag = (iso.fit_predict(y.reshape(-1,1)) == -1)
+        iso_flag = (iso.fit_predict(y.reshape(-1, 1)) == -1)
     except Exception:
         iso_flag = np.zeros_like(z_flag, dtype=bool)
     df["rzs"] = rzs
@@ -333,14 +355,17 @@ def plot_anoms(an_df: pd.DataFrame, title: str):
     fig.add_trace(go.Scatter(x=an_df["ds"], y=an_df["y"], mode="lines+markers", name="Billing"))
     flag = an_df[an_df["anomaly"]]
     if not flag.empty:
-        fig.add_trace(go.Scatter(x=flag["ds"], y=flag["y"], mode="markers", name="Anomaly",
-                                 marker=dict(size=10, symbol="x", color="#FF7A70")))
-    fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
+        fig.add_trace(go.Scatter(
+            x=flag["ds"], y=flag["y"], mode="markers", name="Anomaly",
+            marker=dict(size=10, symbol="x", color="#FF7A70")
+        ))
+    fig.update_layout(title=title, height=420, margin=dict(l=10, r=10, b=10, t=50))
     st.plotly_chart(fig, use_container_width=True)
 
 # ---------------- LOS HELPERS ----------------
 def los_bucket(days: float) -> str:
-    if pd.isna(days): return np.nan
+    if pd.isna(days):
+        return np.nan
     d = float(days)
     if d <= 5: return "Short"
     if d <= 15: return "Medium"
@@ -348,11 +373,12 @@ def los_bucket(days: float) -> str:
     return "Very Long"
 
 def los_prep(data: pd.DataFrame):
-    if "length_of_stay" not in data: return None
+    if "length_of_stay" not in data:
+        return None
     d = data.dropna(subset=["length_of_stay"]).copy()
     d["los_bucket"] = d["length_of_stay"].apply(los_bucket)
-    num_cols = [c for c in ["age","billing_amount","length_of_stay","dow","month","is_emergency"] if c in d.columns]
-    cat_cols = [c for c in ["admission_type","insurer","hospital","condition","doctor","age_group","icd_code"] if c in d.columns]
+    num_cols = [c for c in ["age", "billing_amount", "length_of_stay", "dow", "month", "is_emergency"] if c in d.columns]
+    cat_cols = [c for c in ["admission_type", "insurer", "hospital", "condition", "doctor", "age_group", "icd_code"] if c in d.columns]
     X = d[num_cols + cat_cols].copy(); y = d["los_bucket"].copy()
     for c in num_cols: X[c] = pd.to_numeric(X[c], errors="coerce").fillna(X[c].median())
     for c in cat_cols: X[c] = X[c].fillna("Unknown")
@@ -366,6 +392,8 @@ def _get_openai_client():
       2) os.environ["OPENAI_API_KEY"]
       3) st.session_state["OPENAI_API_KEY"] (manual entry)
     Validates key prefix and falls back gracefully.
+    NOTE: We build an explicit httpx.Client to avoid the 'proxies' kwarg issue
+    when httpx>=0.28 is installed with openai==1.44.x.
     """
     key = (
         st.secrets.get("OPENAI_API_KEY")
@@ -375,19 +403,30 @@ def _get_openai_client():
     if not key:
         st.info("OpenAI disabled: no OPENAI_API_KEY in Secrets/env/session.")
         return None
+
     key = key.strip()
     if not key.startswith("sk-"):
         st.error("OPENAI_API_KEY looks invalid (must start with 'sk-').")
         return None
+
     try:
-        from openai import OpenAI  # lazy import for robustness
-        return OpenAI(api_key=key)
+        from openai import OpenAI  # modern SDK
+        try:
+            import httpx
+            # Create an httpx client compatible with both httpx<0.28 and >=0.28
+            http_client = httpx.Client(follow_redirects=True, timeout=30.0)
+            client = OpenAI(api_key=key, http_client=http_client)
+        except Exception:
+            # Fallback: try default constructor
+            client = OpenAI(api_key=key)
+        return client
     except Exception as e:
-        st.error(f"Could not initialize OpenAI client: {e}")
+        # Don't hard fail the app; just disable AI and continue.
+        st.warning(f"OpenAI disabled (client init failed): {e}")
         return None
 
 def _model_fallback():
-    preferred = (st.secrets.get("PREFERRED_OPENAI_MODEL","") or os.environ.get("PREFERRED_OPENAI_MODEL","")).strip()
+    preferred = (st.secrets.get("PREFERRED_OPENAI_MODEL", "") or os.environ.get("PREFERRED_OPENAI_MODEL", "")).strip()
     cascade = [m for m in [
         preferred or None,
         "gpt-4o",
@@ -412,9 +451,13 @@ def ai_write(section_title: str, payload: dict):
     use_ai = col1.checkbox(
         f"Use AI for {section_title}",
         value=client is not None,
-        key=f"ai_{section_title}"
+        key=f"ai_use_{section_title}"
     )
-    analyst = col2.toggle("Analyst mode (more detail)", value=False, key=f"ai_mode_{section_title}")
+    analyst = col2.toggle(
+        "Analyst mode (more detail)",
+        value=False,
+        key=f"ai_mode_{section_title}"
+    )
 
     if use_ai and client:
         prompt = textwrap.dedent(f"""
@@ -446,10 +489,10 @@ def ai_write(section_title: str, payload: dict):
             last_err = err
 
         if chosen is None:
-            st.error("OpenAI call failed on all fallback models.")
+            st.info("AI writer is unavailable right now.")
             if last_err:
-                st.caption(f"Last error: {last_err}")
-            use_ai = False
+                with st.expander("AI error", expanded=False):
+                    st.caption(last_err)
 
     if not use_ai:
         st.markdown(f"**Deterministic summary ({section_title})**")
@@ -466,20 +509,33 @@ if "decision_log" not in st.session_state:
 
 def action_footer(section: str):
     st.markdown("#### Action footer")
-    c1, c2, c3, c4 = st.columns([1.2,1,1,1])
-    owner = c1.selectbox("Owner", ["House Supervisor","Revenue Integrity","Case Mgmt","Unit Manager","Finance Lead"])
-    decision = c2.selectbox("Decision", ["Promote","Hold","Tune","Investigate"])
-    sla_date = c3.date_input("SLA Date", value=date.today())
-    sla_time = c4.time_input("SLA Time", value=datetime.now().time())
-    note = st.text_input("Notes (optional)")
-    colA, colB = st.columns([1,1])
-    if colA.button(f"Save to Decision Log ({section})"):
+    c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
+    owner = c1.selectbox(
+        "Owner",
+        ["House Supervisor", "Revenue Integrity", "Case Mgmt", "Unit Manager", "Finance Lead"],
+        key=f"owner_{section}"
+    )
+    decision = c2.selectbox(
+        "Decision",
+        ["Promote", "Hold", "Tune", "Investigate"],
+        key=f"decision_{section}"
+    )
+    sla_date = c3.date_input("SLA Date", value=date.today(), key=f"sla_date_{section}")
+    sla_time = c4.time_input("SLA Time", value=datetime.now().time(), key=f"sla_time_{section}")
+    note = st.text_input("Notes (optional)", key=f"note_{section}")
+
+    colA, colB = st.columns([1, 1])
+    if colA.button(f"Save to Decision Log ({section})", key=f"save_{section}"):
         st.session_state["decision_log"].append({
             "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "section": section, "owner": owner, "decision": decision,
-            "sla": f"{sla_date} {sla_time}", "note": note
+            "section": section,
+            "owner": owner,
+            "decision": decision,
+            "sla": f"{sla_date} {sla_time}",
+            "note": note
         })
         st.success("Saved to Decision Log.")
+    # Always show a download button so execs can export any time
     df_log = pd.DataFrame(st.session_state["decision_log"])
     st.download_button(
         label="Download Decision Log (CSV)",
@@ -494,53 +550,61 @@ tabs = st.tabs(["📈 Admissions Control", "🧾 Revenue Watch", "🛏️ LOS Pl
 # ===== 1) Admissions Control =====
 with tabs[0]:
     st.subheader("📈 Admissions Control — Forecast → Staffing Targets")
+    # Cohort Explorer
     c1, c2, c3, c4 = st.columns(4)
-    cohort_dim = c1.selectbox("Cohort dimension", ["All","hospital","insurer","condition"])
+    cohort_dim = c1.selectbox("Cohort dimension", ["All", "hospital", "insurer", "condition"], key="adm_cohort_dim")
     cohort_val = c2.selectbox(
         "Cohort value",
-        ["(all)"] + (sorted(fdf[cohort_dim].dropna().unique().tolist()) if cohort_dim!="All" and cohort_dim in fdf else []),
+        ["(all)"] + (sorted(fdf[cohort_dim].dropna().unique().tolist()) if cohort_dim != "All" and cohort_dim in fdf else []),
+        key="adm_cohort_val"
     )
-    agg = c3.selectbox("Aggregation", ["Daily","Weekly"], index=0)
-    horizon = c4.slider("Forecast horizon (days)", 7, 90, 30)
-    freq = "D" if agg=="Daily" else "W"
+    agg = c3.selectbox("Aggregation", ["Daily", "Weekly"], index=0, key="adm_agg")
+    horizon = c4.slider("Forecast horizon (days)", 7, 90, 30, key="adm_horizon")
+    freq = "D" if agg == "Daily" else "W"
 
+    # Filter to chosen cohort
     fdx = fdf.copy()
-    if cohort_dim!="All" and cohort_dim in fdx and cohort_val and cohort_val!="(all)":
-        fdx = fdx[fdx[cohort_dim]==cohort_val]
+    if cohort_dim != "All" and cohort_dim in fdx and cohort_val and cohort_val != "(all)":
+        fdx = fdx[fdx[cohort_dim] == cohort_val]
 
     ts = build_timeseries(fdx, metric="intake", freq=freq)
     if ts.empty:
         st.info("No admissions series for the current cohort/filters.")
     else:
+        # Seasonality heatmap (weekly view)
         with st.expander("Seasonality calendar (avg admissions by week-of-year × weekday)"):
             s = fdx.set_index("admit_date").assign(_one=1)["_one"].resample("D").sum().fillna(0.0)
             cal = pd.DataFrame({"dow": s.index.weekday, "woy": s.index.isocalendar().week.values, "val": s.values})
-            heat = cal.groupby(["woy","dow"])["val"].mean().reset_index()
+            heat = cal.groupby(["woy", "dow"])["val"].mean().reset_index()
             heat_pivot = heat.pivot(index="woy", columns="dow", values="val").fillna(0)
             fig = px.imshow(heat_pivot, aspect="auto", labels=dict(x="Weekday (0=Mon)", y="Week of Year", color="Avg admits"))
-            fig.update_layout(height=360, margin=dict(l=10,r=10,b=10,t=30))
+            fig.update_layout(height=360, margin=dict(l=10, r=10, b=10, t=30))
             st.plotly_chart(fig, use_container_width=True)
 
+        # Scenario sliders
         sc1, sc2 = st.columns(2)
-        flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5)
-        weather_pct = sc2.slider("Weather impact (±%)", -20, 20, 0, 5)
+        flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5, key="adm_flu")
+        weather_pct = sc2.slider("Weather impact (±%)", -20, 20, 0, 5, key="adm_weather")
 
-        candidates = ["Holt-Winters","ARIMA (SARIMAX)"] + (["Prophet"] if _HAS_PROPHET else [])
-        chosen = st.multiselect("Models to compare", candidates, default=candidates)
+        # Model selection
+        candidates = ["Holt-Winters", "ARIMA (SARIMAX)"] + (["Prophet"] if _HAS_PROPHET else [])
+        chosen = st.multiselect("Models to compare", candidates, default=candidates, key="adm_models")
 
+        # Forecast + scenario adjustment
         fc = run_forecasts(ts, horizon=horizon, models=chosen)
         adj_factor = (100 + flu_pct + weather_pct) / 100.0
-        fc_adj = {k: v.assign(yhat=v["yhat"] * adj_factor) for k,v in fc.items()}
+        fc_adj = {k: v.assign(yhat=v["yhat"] * adj_factor) for k, v in fc.items()}
 
         plot_ts(
             ts,
             fc_adj,
-            f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'} (with scenario)"
+            f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim != 'All' else 'All'} (with scenario)"
         )
 
+        # Backtest comparison
         metrics = compare_backtests(ts, horizon=horizon, models=chosen)
         if metrics:
-            tbl = pd.DataFrame(metrics).T[["MAPE%","MAE","RMSE"]].sort_values("MAPE%")
+            tbl = pd.DataFrame(metrics).T[["MAPE%", "MAE", "RMSE"]].sort_values("MAPE%")
             st.markdown("#### 📊 Model Performance (backtests)")
             st.markdown(style_lower_better(tbl), unsafe_allow_html=True)
             st.caption("Lower is better. Green → Red indicates rank per metric.")
@@ -548,11 +612,12 @@ with tabs[0]:
             tbl = None
             st.info("Backtests unavailable (insufficient history).")
 
+        # Staffing target heuristic (illustrative)
         st.markdown("#### Staffing targets (illustrative heuristic)")
         if fc_adj:
             first_model = list(fc_adj.keys())[0]
             daily_fc = fc_adj[first_model]["yhat"].to_numpy()
-            rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)
+            rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)  # illustrative heuristic
             targets = pd.DataFrame({
                 "Date": pd.to_datetime(fc_adj[first_model]["ds"]).dt.date,
                 "Expected Admissions": np.round(daily_fc, 1),
@@ -562,6 +627,7 @@ with tabs[0]:
         else:
             st.info("No forecast available to compute staffing targets.")
 
+        # AI Explainer (per-section)
         ai_payload = {
             "cohort": {"dimension": cohort_dim, "value": cohort_val},
             "aggregation": agg,
@@ -572,16 +638,18 @@ with tabs[0]:
         }
         st.markdown("---")
         ai_write("Admissions Control", ai_payload)
+
+        # Action footer
         action_footer("Admissions Control")
 
 # ===== 2) Revenue Watch =====
 with tabs[1]:
     st.subheader("🧾 Revenue Watch — Anomalies → Cash Protection")
     c1, c2, c3 = st.columns(3)
-    agg = c1.selectbox("Aggregation", ["Daily","Weekly"], index=0, key="bill_agg")
+    agg = c1.selectbox("Aggregation", ["Daily", "Weekly"], index=0, key="bill_agg")
     sensitivity = c2.slider("Sensitivity (higher = fewer alerts)", 1.5, 5.0, 3.0, 0.1, key="bill_sens")
     baseline_weeks = c3.slider("Baseline window (weeks)", 2, 12, 4, 1, key="bill_base")
-    freq = "D" if agg=="Daily" else "W"
+    freq = "D" if agg == "Daily" else "W"
 
     ts_bill = build_timeseries(fdf, metric="billing_amount", freq=freq)
     if ts_bill.empty:
@@ -591,29 +659,32 @@ with tabs[1]:
         an = detect_anomalies(ts_bill, sensitivity)
         plot_anoms(an, "Billing Amount with Anomalies")
 
+        # Root-cause drilldowns
         st.markdown("#### Root-cause explorer")
-        dims = [d for d in ["insurer","hospital","condition","doctor"] if d in fdf.columns]
+        dims = [d for d in ["insurer", "hospital", "condition", "doctor"] if d in fdf.columns]
         if not dims:
             st.info("No categorical dimensions available for drilldown.")
         else:
-            drill = st.selectbox("Group anomalies by", dims, index=0)
+            drill = st.selectbox("Group anomalies by", dims, index=0, key="bill_drill")
 
             if isinstance(an, pd.DataFrame) and not an.empty:
+                # Build anomaly-day flags using .dt.date (fix for AttributeError)
                 fdf_agg = fdf.set_index("admit_date")
                 an_series = pd.to_datetime(an.loc[an["anomaly"], "ds"])
                 an_days = set(an_series.dt.date.tolist())
                 fdf_agg["is_anom_day"] = pd.Series(fdf_agg.index.date, index=fdf_agg.index).isin(an_days).astype(int)
 
                 grp = fdf_agg.groupby(drill).agg(
-                    billing_total=("billing_amount","sum"),
-                    encounters=("billing_amount","count"),
-                    anomaly_days=("is_anom_day","sum")
+                    billing_total=("billing_amount", "sum"),
+                    encounters=("billing_amount", "count"),
+                    anomaly_days=("is_anom_day", "sum")
                 ).reset_index().sort_values("anomaly_days", ascending=False)
 
                 st.dataframe(grp, use_container_width=True)
             else:
                 st.info("No anomalies available for drilldown in the current window.")
 
+        # Recent anomaly facts (guarded)
         if isinstance(an, pd.DataFrame) and not an.empty:
             recent = an.tail(30)
             flagged = recent[recent["anomaly"]]
@@ -622,7 +693,7 @@ with tabs[1]:
                     st.success("No recent anomalies.")
                 else:
                     st.dataframe(
-                        flagged[["ds","y","rzs","score"]].rename(columns={"ds":"When","y":"Value"}),
+                        flagged[["ds", "y", "rzs", "score"]].rename(columns={"ds": "When", "y": "Value"}),
                         use_container_width=True
                     )
         else:
@@ -663,6 +734,7 @@ with tabs[2]:
                 X, y, test_size=0.25, random_state=42
             )
 
+        # Proper preprocessing
         pre = ColumnTransformer(
             transformers=[
                 ("num", StandardScaler(), [c for c in num_cols if c in X.columns]),
@@ -698,22 +770,23 @@ with tabs[2]:
 
             acc = accuracy_score(y_test, y_pred)
             pr, rc, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="weighted", zero_division=0)
-            auc = None; fprs={}; tprs={}
-            if (y_test_bin is not None) and (y_proba is not None) and (y_proba.shape[1]==len(classes)):
+            auc = None; fprs = {}; tprs = {}
+            if (y_test_bin is not None) and (y_proba is not None) and (y_proba.shape[1] == len(classes)):
                 try:
                     auc = roc_auc_score(label_binarize(y_test, classes=classes), y_proba, average="weighted", multi_class="ovr")
                     for i, cls in enumerate(classes):
-                        fpr, tpr, _ = roc_curve(label_binarize(y_test, classes=classes)[:,i], y_proba[:,i])
+                        fpr, tpr, _ = roc_curve(label_binarize(y_test, classes=classes)[:, i], y_proba[:, i])
                         fprs[cls] = fpr; tprs[cls] = tpr
                 except Exception:
                     pass
-            results[name] = {"Accuracy":acc, "Precision":pr, "Recall":rc, "F1":f1, "ROC-AUC":auc}
+            results[name] = {"Accuracy": acc, "Precision": pr, "Recall": rc, "F1": f1, "ROC-AUC": auc}
             roc_curves[name] = (fprs, tprs)
 
         perf = pd.DataFrame(results).T
-        for c in ["Accuracy","Precision","Recall","F1","ROC-AUC"]:
-            if c not in perf: perf[c] = np.nan
-        perf = perf[["Accuracy","Precision","Recall","F1","ROC-AUC"]]
+        for c in ["Accuracy", "Precision", "Recall", "F1", "ROC-AUC"]:
+            if c not in perf:
+                perf[c] = np.nan
+        perf = perf[["Accuracy", "Precision", "Recall", "F1", "ROC-AUC"]]
 
         st.markdown("#### 📊 Model Performance (Classification)")
         st.markdown(style_higher_better(perf), unsafe_allow_html=True)
@@ -726,13 +799,14 @@ with tabs[2]:
         for cls in classes:
             if cls in fprs and cls in tprs:
                 fig.add_trace(go.Scatter(x=fprs[cls], y=tprs[cls], mode="lines", name=f"{top_model} — {cls}"))
-        fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Chance", line=dict(dash="dash")))
+        fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Chance", line=dict(dash="dash")))
         fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
         st.plotly_chart(fig, use_container_width=True)
 
+        # Equity slices (group performance by insurer or age_group)
         st.markdown("#### Equity slices")
-        slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
-        slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if "insurer" in slice_dim_options else 0) if slice_dim_options else None
+        slice_dim_options = [d for d in ["insurer", "age_group"] if d in d_full.columns]
+        slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if "insurer" in slice_dim_options else 0, key="los_slice_dim") if slice_dim_options else None
         if slice_dim:
             best_pipe = models[top_model]
             X_test_idx = X_test.index
@@ -740,13 +814,14 @@ with tabs[2]:
             y_pred_best = best_pipe.predict(X_test)
             grp_rows = []
             for sv in sorted(slice_vals.unique().tolist()):
-                mask = (slice_vals==sv)
+                mask = (slice_vals == sv)
                 acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
                 grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
             st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), use_container_width=True)
 
+        # Per-section AI
         ai_payload = {
-            "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
+            "buckets": {"Short": "<=5", "Medium": "6-15", "Long": "16-45", "Very Long": ">45"},
             "metrics_table": perf.to_dict(),
             "top_model": top_model,
             "equity_slice": slice_dim
