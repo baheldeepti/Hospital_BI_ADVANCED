@@ -543,7 +543,7 @@ st.info(f"Click to load {component_name}")
 return None
 ---------------- NAV ----------------
 tabs = st.tabs(["📈 Admissions Control", "🧾 Revenue Watch", "🛏️ LOS Planner"])
-===== 1) Admissions Control =====
+
 with tabs[0], safe_zone("Admissions Control"):
 st.subheader("📈 Admissions Control — Forecast → Staffing Targets")
 c1, c2, c3, c4 = st.columns(4)
@@ -634,7 +634,7 @@ else:
     st.markdown("---")
     ai_write("Admissions Control", ai_payload)
     action_footer("Admissions Control")
-===== 2) Revenue Watch =====
+
 with tabs[1], safe_zone("Revenue Watch"):
 st.subheader("🧾 Revenue Watch — Anomalies → Cash Protection")
 c1, c2, c3 = st.columns(3)
