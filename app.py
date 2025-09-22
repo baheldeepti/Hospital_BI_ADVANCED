@@ -51,18 +51,19 @@ hr{border-top:1px solid #eee}
 """, unsafe_allow_html=True)
 st.title("Hospital Ops Studio — Control Tower")
 st.caption("Admissions Control • Revenue Watch • LOS Planner — decisions first, dashboards second")
-#SIDEBAR SETTINGS ----------------
+#SIDEBAR SETTINGS
 with st.sidebar:
-st.header("Settings")
-AI_TOGGLE = st.toggle("Enable AI narratives", value=True, key="ai_toggle")
-st.caption("Tip: configure OPENAI_API_KEY and OPENAI_MODEL in Secrets.")
-# Resource monitor
-process = psutil.Process()
-mem_mb = process.memory_info().rss / 1024 / 1024
-st.metric("Memory (MB)", f"{mem_mb:.1f}")
-if mem_mb > 1000:
-st.warning("High memory usage. Running GC.")
-gc.collect()
+with st.sidebar:
+    st.header("Settings")
+    AI_TOGGLE = st.toggle("Enable AI narratives", value=True, key="ai_toggle")
+    st.caption("Tip: configure OPENAI_API_KEY and OPENAI_MODEL in Secrets.")
+    # Resource monitor
+    process = psutil.Process()
+    mem_mb = process.memory_info().rss / 1024 / 1024
+    st.metric("Memory (MB)", f"{mem_mb:.1f}")
+    if mem_mb > 1000:
+        st.warning("High memory usage. Running GC.")
+        gc.collect()
 ---------------- DATA LAYER ----------------
 ICD_MAPPING = {
 'Infections': 'A49.9', 'Flu': 'J10.1', 'Cancer': 'C80.1', 'Asthma': 'J45.909',
