@@ -224,7 +224,6 @@ with st.expander("Data source (optional override)"):
             st.error(f"Failed to read uploaded CSV: {e}")
 # Data Quality Monitor 
 class DataQualityMonitor:
-class DataQualityMonitor:
     def _detect_outliers(self, df: pd.DataFrame) -> Dict[str, int]:
         out = {}
         for col in ["billing_amount","length_of_stay","age"]:
