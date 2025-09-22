@@ -703,7 +703,7 @@ ai_payload = {
 st.markdown("---")
 ai_write("Revenue Watch", ai_payload)
 action_footer("Revenue Watch")
-===== 3) LOS Planner =====
+#LOS Planner
 with tabs[2], safe_zone("LOS Planner"):
 st.subheader("🛏️ LOS Planner — Risk Buckets → Discharge Orchestration")
 prep = los_prep(fdf)
