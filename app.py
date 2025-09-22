@@ -16,11 +16,10 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score, roc_curve
 try:
-from xgboost import XGBClassifier  # type: ignore
-_HAS_XGB = True
+from xgboost import XGBClassifier  
 except Exception:
 _HAS_XGB = False
-System & monitoring
+#System & monitoring
 import psutil
 import structlog
 st.set_page_config(page_title="Hospital Ops Studio — Control Tower", layout="wide", page_icon="🏥")
