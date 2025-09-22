@@ -98,7 +98,7 @@ RENAME_MAP = {
 "Test Results": "test_results",
 "Age": "age",
 }
-Copydef __init__(self): ...
+def __init__(self):
 
 @staticmethod
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
