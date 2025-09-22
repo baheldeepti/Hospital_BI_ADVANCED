@@ -10,3 +10,4 @@ psutil==6.0.0
 structlog==24.1.0
 prophet==1.1.5
 cmdstanpy<1.2
+boto3
