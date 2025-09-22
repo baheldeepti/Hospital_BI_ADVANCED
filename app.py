@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pandas as pd
 import streamlit as st
-----Viz / ML--------
 import plotly.graph_objects as go
 import plotly.express as px
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -24,16 +23,13 @@ _HAS_XGB = False
 System & monitoring
 import psutil
 import structlog
----------------- CONFIG / THEME ----------------
 st.set_page_config(page_title="Hospital Ops Studio — Control Tower", layout="wide", page_icon="🏥")
 RAW_URL = "https://raw.githubusercontent.com/baheldeepti/hospital-streamlit-app/main/modified_healthcare_dataset.csv"
-------------- Logging (structured) -------------
 structlog.configure(
 processors=[structlog.processors.TimeStamper(fmt="iso"), structlog.dev.ConsoleRenderer()],
 wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
 )
 logger = structlog.get_logger()
------------------ Styles -----------------------
 st.markdown("""
 <style>
 :root{
@@ -54,7 +50,7 @@ hr{border-top:1px solid #eee}
 """, unsafe_allow_html=True)
 st.title("Hospital Ops Studio — Control Tower")
 st.caption("Admissions Control • Revenue Watch • LOS Planner — decisions first, dashboards second")
----------------- SIDEBAR SETTINGS ----------------
+#SIDEBAR SETTINGS ----------------
 with st.sidebar:
 st.header("Settings")
 AI_TOGGLE = st.toggle("Enable AI narratives", value=True, key="ai_toggle")
