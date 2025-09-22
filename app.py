@@ -31,12 +31,13 @@ def _safe_plotly_chart(fig, **kwargs):
     # kill any width=... key and always stretch to container
     kwargs.pop("width", None)
     kwargs.setdefault("use_container_width", True)
-    return _safe_plotly_chart(fig, **kwargs)
+    return st.plotly_chart(fig, **kwargs)
 
 def _safe_dataframe(df, **kwargs):
     kwargs.pop("width", None)
     kwargs.setdefault("use_container_width", True)
-    return _safe_dataframe(df, **kwargs)
+    return st.dataframe(df, **kwargs)
+
 
 # Add periodic garbage collection
 if st.button("Clear Cache & GC"):
@@ -515,7 +516,7 @@ def plot_anoms(an_df: pd.DataFrame, title: str):
         fig.add_trace(go.Scatter(x=flag["ds"], y=flag["y"], mode="markers", name="Anomaly",
                                  marker=dict(size=10, symbol="x")))
     fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
-    _safe_plotly_chart(fig, width="stretch")
+    _safe_plotly_chart(fig)
 
 # ---------------- LOS HELPERS ----------------
 def los_bucket(days: float) -> str:
@@ -760,7 +761,7 @@ def run_app():
                 fig = px.imshow(heat_pivot, aspect="auto",
                                 labels=dict(x="Weekday (0=Mon)", y="Week of Year", color="Avg admits"))
                 fig.update_layout(height=360, margin=dict(l=10,r=10,b=10,t=30))
-                _safe_plotly_chart(fig, width="stretch")
+                _safe_plotly_chart(fig)
     
             sc1, sc2 = st.columns(2)
             flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5, key="adm_flu")
@@ -774,7 +775,7 @@ def run_app():
             for name, fc in fc_dict.items():
                 fig.add_trace(go.Scatter(x=fc["ds"], y=fc["yhat"]*adj_factor, name=name, mode="lines"))
             fig.update_layout(title="Admissions Forecast", height=420, margin=dict(l=10,r=10,b=10,t=50))
-            _safe_plotly_chart(fig, width="stretch")
+            _safe_plotly_chart(fig)
     
             # Backtests & selection
             try:
@@ -800,7 +801,7 @@ def run_app():
                 "Expected Admissions": np.round(daily_fc, 1),
                 "RN/Day": rn_per_shift, "RN/Evening": rn_per_shift, "RN/Night": rn_per_shift
             })
-            _safe_dataframe(targets, width="stretch", hide_index=True)
+            _safe_dataframe(targets, hide_index=True)
     
             ai_payload = {"cohort": {"dimension": cohort_dim, "value": cohort_val},
                           "aggregation": agg, "horizon_days": horizon,
@@ -840,7 +841,7 @@ def run_app():
                         encounters=("billing_amount","count"),
                         anomaly_days=("is_anom_day","sum")
                     ).reset_index().sort_values("anomaly_days", ascending=False)
-                    _safe_dataframe(grp, width="stretch")
+                    _safe_dataframe(grp)
     
         ai_payload = {"aggregation": agg, "sensitivity": sensitivity, "baseline_weeks": baseline_weeks}
         st.markdown("---")
@@ -979,7 +980,7 @@ def run_app():
                         fig.add_trace(go.Scatter(x=fprs[cls], y=tprs[cls], mode="lines", name=f"{top_model} — {cls}"))
                 fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Chance", line=dict(dash="dash")))
                 fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
-                _safe_plotly_chart(fig, width="stretch")
+                _safe_plotly_chart(fig)
     
             with st.expander("ROC Curves (one-vs-rest)"):
                 _render_roc()
@@ -1007,7 +1008,7 @@ def run_app():
                         acc_g = np.nan
                     grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
     
-                _safe_dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width="stretch")
+                _safe_dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False))
     
             ai_payload = {
                 "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
@@ -1029,7 +1030,7 @@ def run_app():
         if df_log.empty:
             st.info("No decisions logged yet.")
         else:
-            _safe_dataframe(df_log, width="stretch")
+            _safe_dataframe(df_log)
             st.download_button(
                 label="Download Decision Log (CSV)",
                 data=df_log.to_csv(index=False).encode("utf-8"),
