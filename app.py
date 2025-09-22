@@ -1,8 +1,11 @@
-# app.py — Hospital Ops Studio (stable on Streamlit 1.49+, sklearn 1.5+, Python 3.11)
+# app.py — Hospital Ops Studio (conference build)
+# Streamlit 1.49+, Python 3.11, sklearn 1.5+
+# Features: Prophet+ARIMA forecasting, model comparison with color coding,
+# polished AI narratives with safe fallbacks, robust tabs, data-quality, LOS classifier.
 
-import os, json, textwrap, asyncio, gc, logging, hashlib
+import os, json, textwrap, asyncio, gc, logging
 from datetime import datetime, date, timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -13,6 +16,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
@@ -23,14 +27,26 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc
 
 # Optional extras — degrade gracefully if missing
 try:
+    from prophet import Prophet  # fbprophet renamed to prophet
+    _HAS_PROPHET = True
+except Exception:
+    _HAS_PROPHET = False
+
+try:
     from xgboost import XGBClassifier  # type: ignore
     _HAS_XGB = True
 except Exception:
     _HAS_XGB = False
 
 # System & monitoring
-import psutil
+try:
+    import psutil
+    _HAS_PSUTIL = True
+except Exception:
+    _HAS_PSUTIL = False
+
 import structlog
+from contextlib import contextmanager
 
 # ---------------- CONFIG / THEME ----------------
 st.set_page_config(page_title="Hospital Ops Studio — Control Tower", layout="wide", page_icon="🏥")
@@ -43,36 +59,36 @@ structlog.configure(
 )
 logger = structlog.get_logger()
 
-# ----------------- Styles (sticky top tabs + clearer nav) -----------------------
+# ----------------- Styles -----------------------
 st.markdown("""
 <style>
 :root{
   --pri:#0F4C81; --teal:#159E99; --ink:#1F2937; --sub:#6B7280;
-  --ok:#14A38B; --warn:#F59E0B; --alert:#EF4444; --pin:#FF7A70;
+  --ok:#14A38B; --warn:#F59E0B; --alert:#EF4444;
 }
 .block-container{max-width:1500px;padding-top:12px}
 h1,h2,h3{font-weight:700;color:var(--ink)}
 a {color:var(--teal)}
 .stButton>button{background:var(--pri);color:#fff;border-radius:10px}
-.tag{display:inline-block;padding:.2rem .5rem;border-radius:.5rem;background:#F3F4F6;color:var(--ink);margin-right:.3rem}
-.badge-ok{background:rgba(20,163,139,.12)}
-.badge-warn{background:rgba(245,158,11,.12)}
-.badge-alert{background:rgba(239,68,68,.12)}
-.small{color:var(--sub);font-size:0.9rem}
+.small{color:var(--sub);font-size:0.92rem}
 hr{border-top:1px solid #eee}
-
-/* Sticky tabs bar across Streamlit builds */
-.stTabs [data-baseweb="tab-list"],
-.stTabs div[role="tablist"]{
+.stTabs [data-baseweb="tab-list"], .stTabs div[role="tablist"]{
   position: sticky; top: 0; z-index: 5; background: white;
   border-bottom: 1px solid #eee; padding-top:.25rem; margin-top:.25rem;
 }
 .stTabs [data-baseweb="tab"], .stTabs div[role="tab"]{font-weight:600}
-
-/* Optional mini top-nav */
-.navbar{display:flex; gap:.5rem; flex-wrap:wrap; margin:.2rem 0 .4rem 0}
-.navbar .pill{padding:.35rem .6rem; border:1px solid #e5e7eb; border-radius:999px; cursor:pointer}
-.navbar .pill.active{background:#0F4C81; color:#fff; border-color:#0F4C81}
+.kpi{
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:6px 0 8px;
+}
+.kpi .card{
+  border:1px solid #e5e7eb; border-radius:14px; padding:12px 14px; background:#fff;
+  box-shadow:0 1px 2px rgba(0,0,0,.04);
+}
+.kpi .h{color:#6b7280;font-size:.85rem}
+.kpi .v{font-size:1.3rem; font-weight:700; color:#111827}
+.exec-box{
+  border-left:6px solid var(--pri); background:#f9fafb; padding:12px 14px; border-radius:8px; margin:.25rem 0 .75rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -83,14 +99,16 @@ st.caption("Admissions Control • Revenue Watch • LOS Planner — decisions f
 with st.sidebar:
     st.header("Settings")
     AI_TOGGLE = st.toggle("Enable AI narratives", value=True, key="ai_toggle")
-    st.caption("Tip: configure OPENAI_API_KEY and OPENAI_MODEL in Secrets.")
-    # Resource monitor
-    process = psutil.Process()
-    mem_mb = process.memory_info().rss / 1024 / 1024
-    st.metric("Memory (MB)", f"{mem_mb:.1f}")
-    if mem_mb > 1000:
-        st.warning("High memory usage. Running GC.")
-        gc.collect()
+    st.caption("Tip: set OPENAI_API_KEY and OPENAI_MODEL in Secrets or environment.")
+    if _HAS_PSUTIL:
+        process = psutil.Process()
+        mem_mb = process.memory_info().rss / 1024 / 1024
+        st.metric("Memory (MB)", f"{mem_mb:.1f}")
+        if mem_mb > 1000:
+            st.warning("High memory usage. Running GC.")
+            gc.collect()
+    else:
+        st.caption("psutil not installed — memory metrics unavailable.")
 
 # ---------------- DATA LAYER ----------------
 ICD_MAPPING = {
@@ -99,7 +117,6 @@ ICD_MAPPING = {
 }
 
 class HospitalDataManager:
-    """Chunked loader with schema normalization + simple validation."""
     BASE_SCHEMA = {
         'admit_date': 'datetime64[ns]',
         'discharge_date': 'datetime64[ns]',
@@ -126,9 +143,6 @@ class HospitalDataManager:
         "Test Results": "test_results",
         "Age": "age",
     }
-
-    def __init__(self):
-        pass
 
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         for k, v in self.RENAME_MAP.items():
@@ -170,7 +184,8 @@ class HospitalDataManager:
         return df
 
     def _validate_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
-        chunk = chunk.dropna(subset=["admit_date"])
+        if "admit_date" in chunk:
+            chunk = chunk.dropna(subset=["admit_date"])
         if "length_of_stay" in chunk:
             chunk["length_of_stay"] = chunk["length_of_stay"].clip(lower=0, upper=365)
         if "billing_amount" in chunk:
@@ -178,22 +193,23 @@ class HospitalDataManager:
         return chunk
 
     def _get_fallback_data(self) -> pd.DataFrame:
-        dates = pd.date_range(end=pd.Timestamp.today(), periods=60, freq="D")
+        # Deterministic-ish fallback for demo
+        rng = np.random.default_rng(42)
+        dates = pd.date_range(end=pd.Timestamp.today(), periods=120, freq="D")
         df = pd.DataFrame({
             "admit_date": dates,
-            "billing_amount": np.random.gamma(5, 200, len(dates)),
-            "length_of_stay": np.random.randint(1, 10, len(dates)).astype(float),
-            "condition": np.random.choice(list(ICD_MAPPING.keys()), len(dates)),
-            "admission_type": np.random.choice(["Emergency","Elective","Urgent"], len(dates)),
-            "insurer": np.random.choice(["Aetna","BlueCross","Kaiser"], len(dates)),
-            "hospital": np.random.choice(["North Campus","East Wing"], len(dates)),
-            "doctor": np.random.choice(["Dr. Smith","Dr. Lee","Dr. Patel"], len(dates)),
-            "age": np.random.normal(55, 15, len(dates)).clip(0, 95),
+            "billing_amount": rng.gamma(5, 220, len(dates)),
+            "length_of_stay": rng.integers(1, 12, len(dates)).astype(float),
+            "condition": rng.choice(list(ICD_MAPPING.keys()), len(dates)),
+            "admission_type": rng.choice(["Emergency","Elective","Urgent"], len(dates)),
+            "insurer": rng.choice(["Aetna","BlueCross","Kaiser","United"], len(dates)),
+            "hospital": rng.choice(["North Campus","East Wing","South Pavilion"], len(dates)),
+            "doctor": rng.choice(["Dr. Smith","Dr. Lee","Dr. Patel","Dr. Moore"], len(dates)),
+            "age": np.clip(rng.normal(55, 15, len(dates)), 0, 95),
         })
         df = self._coerce_types(self._feature_engineer(df))
         return df
 
-    # --- Cache: we make it static so Streamlit doesn't try to hash `self`
     @staticmethod
     @st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
     def load_data_chunked(url: str, chunk_size: int = 10000) -> pd.DataFrame:
@@ -251,11 +267,12 @@ class DataQualityMonitor:
         return {c: (c in df.columns) for c in must}
 
     def generate_quality_report(self, df: pd.DataFrame) -> dict:
-        completeness = (1 - df.isnull().sum() / max(len(df), 1)).to_dict()
+        completeness = (1 - df.isnull().sum() / max(len(df), 1))
+        completeness = completeness[[c for c in completeness.index if completeness[c] == completeness[c]]]
         return {
             "rows": int(len(df)),
             "duplicates": int(df.duplicated().sum()),
-            "completeness": {k: float(v) for k,v in completeness.items() if isinstance(v,(int,float,np.floating))},
+            "completeness": {k: float(v) for k, v in completeness.to_dict().items()},
             "outliers": self._detect_outliers(df),
             "schema_compliance": self._check_schema(df),
         }
@@ -310,30 +327,45 @@ def ts_metrics(y_true, y_pred) -> dict:
 def style_lower_better(df: pd.DataFrame) -> str:
     if df.empty: return ""
     ranks = df.rank(ascending=True, method="min")
-    def bg(col, row):
-        r = ranks.loc[row, col]; rmin, rmax = ranks[col].min(), ranks[col].max()
+    def bg(cell_val, rank, col):
+        if pd.isna(rank): return "background-color: rgba(255,255,255,0.6)"
+        rmin, rmax = ranks[col].min(), ranks[col].max()
         if rmax == rmin: return "background-color: rgba(255,255,255,0.6)"
-        pct = (r - rmin)/(rmax - rmin + 1e-9)
-        red = int(255*pct); green = int(255*(1-pct)); blue = 200
+        pct = (rank - rmin)/(rmax - rmin + 1e-9)
+        red = int(255*pct); green = int(255*(1-pct)); blue = 210
         return f"background-color: rgba({red},{green},{blue},0.25)"
     styled = df.style.format({"MAPE%":"{:.2f}","MAE":"{:.2f}","RMSE":"{:.2f}"})
     for col in df.columns:
-        styled = styled.apply(lambda s: [bg(col, s.name) for _ in s], axis=1)
+        styled = styled.apply(
+            lambda s: [bg(val, ranks.loc[s.name, col], col) for val in s],
+            axis=1
+        )
     return styled.to_html()
 
 def style_higher_better(df: pd.DataFrame) -> str:
     if df.empty: return ""
     ranks = df.rank(ascending=False, method="min")
-    def bg(col, row):
-        r = ranks.loc[row, col]; rmin, rmax = ranks[col].min(), ranks[col].max()
+    def bg(cell_val, rank, col):
+        if pd.isna(rank): return "background-color: rgba(255,255,255,0.6)"
+        rmin, rmax = ranks[col].min(), ranks[col].max()
         if rmax == rmin: return "background-color: rgba(255,255,255,0.6)"
-        pct = (r - rmin)/(rmax - rmin + 1e-9)
-        red = int(255*pct); green = int(255*(1-pct)); blue = 200
+        pct = (rank - rmin)/(rmax - rmin + 1e-9)
+        red = int(255*pct); green = int(255*(1-pct)); blue = 210
         return f"background-color: rgba({red},{green},{blue},0.25)"
     styled = df.style.format("{:.3f}")
     for col in df.columns:
-        styled = styled.apply(lambda s: [bg(col, s.name) for _ in s], axis=1)
+        styled = styled.apply(lambda s: [bg(val, ranks.loc[s.name, col], col) for val in s], axis=1)
     return styled.to_html()
+
+# ---------------- SAFE ZONE ----------------
+@contextmanager
+def safe_zone(label: str):
+    try:
+        yield
+    except Exception as e:
+        logger.error("section_error", section=label, error=str(e))
+        st.error(f"{label}: something went wrong.")
+        st.exception(e)
 
 # ---------------- Model Manager (async-ready) ----------------
 class ModelManager:
@@ -345,13 +377,116 @@ class ModelManager:
             m = ExponentialSmoothing(s, trend="add", seasonal="add", seasonal_periods=7).fit()
         except Exception:
             m = ExponentialSmoothing(s, trend="add").fit()
-        return m.forecast(horizon)
+        return np.asarray(m.forecast(horizon))
 
-    def forecast_one(self, ts: pd.DataFrame, horizon: int) -> pd.DataFrame:
+    def _arima_forecast(self, s: pd.Series, horizon: int) -> np.ndarray:
+        # Simple SARIMAX(1,1,1) with weekly seasonality as a robust default
+        try:
+            model = SARIMAX(s, order=(1,1,1), seasonal_order=(1,0,1,7), enforce_stationarity=False, enforce_invertibility=False)
+            res = model.fit(disp=False)
+            fc = res.forecast(steps=horizon)
+            return np.asarray(fc)
+        except Exception:
+            # Fallback to naive drift
+            diff = s.diff().dropna()
+            drift = diff.mean() if len(diff) else 0.0
+            last = s.iloc[-1]
+            return np.asarray([last + drift*(i+1) for i in range(horizon)])
+
+    def _prophet_forecast(self, ts: pd.DataFrame, horizon: int) -> np.ndarray:
+        if not _HAS_PROPHET:
+            raise RuntimeError("Prophet not available")
+        dfp = ts.rename(columns={"ds":"ds","y":"y"}).copy()
+        m = Prophet(weekly_seasonality=True, daily_seasonality=False, yearly_seasonality=False)
+        m.fit(dfp)
+        future = m.make_future_dataframe(periods=horizon, freq="D", include_history=False)
+        fc = m.predict(future)["yhat"].to_numpy()
+        return fc
+
+    def forecast_all(self, ts: pd.DataFrame, horizon: int) -> Dict[str, pd.DataFrame]:
         s = ts.set_index("ds")["y"].asfreq("D").ffill()
-        yhat = self._holt_forecast(s, horizon)
         idx = pd.date_range(s.index.max() + pd.Timedelta(days=1), periods=horizon, freq="D")
-        return pd.DataFrame({"ds": idx, "yhat": np.asarray(yhat)})
+
+        out = {}
+        # Holt-Winters
+        yhat_hw = self._holt_forecast(s, horizon)
+        out["Holt-Winters"] = pd.DataFrame({"ds": idx, "yhat": yhat_hw})
+        # ARIMA/SARIMAX
+        yhat_arima = self._arima_forecast(s, horizon)
+        out["ARIMA"] = pd.DataFrame({"ds": idx, "yhat": yhat_arima})
+        # Prophet (optional)
+        if _HAS_PROPHET:
+            try:
+                yhat_prophet = self._prophet_forecast(ts, horizon)
+                out["Prophet"] = pd.DataFrame({"ds": idx, "yhat": yhat_prophet})
+            except Exception as e:
+                logger.warning("prophet_failed", error=str(e))
+        return out
+
+    def backtest(self, ts: pd.Series, horizon: int, windows: int = 3) -> Dict[str, Dict[str,float]]:
+        """Rolling-origin backtest for Holt-Winters, ARIMA, Prophet (if available)."""
+        metrics: Dict[str, List[float]] = {"Holt-Winters":[],"ARIMA":[]}
+        if _HAS_PROPHET: metrics["Prophet"] = []
+        n = len(ts)
+        step = horizon
+        # ensure enough history
+        needed = (windows+1)*horizon + 7
+        if n < needed:
+            windows = max(1, (n - 14) // max(1, horizon))
+
+        def eval_pair(y_true, y_pred):
+            return ts_metrics(y_true, y_pred)["MAPE%"]  # we'll compute others later
+
+        for w in range(windows, 0, -1):
+            split = n - w*step
+            train = ts.iloc[:split].asfreq("D").ffill()
+            test = ts.iloc[split:split+step]
+            # HW
+            try:
+                hw = self._holt_forecast(train, step)
+                metrics["Holt-Winters"].append(eval_pair(test.to_numpy(), hw))
+            except Exception:
+                metrics["Holt-Winters"].append(np.nan)
+            # ARIMA
+            try:
+                ar = self._arima_forecast(train, step)
+                metrics["ARIMA"].append(eval_pair(test.to_numpy(), ar))
+            except Exception:
+                metrics["ARIMA"].append(np.nan)
+            # Prophet
+            if _HAS_PROPHET:
+                try:
+                    dfp = pd.DataFrame({"ds": train.index, "y": train.values})
+                    pr_fc = self._prophet_forecast(dfp, step)
+                    metrics["Prophet"].append(eval_pair(test.to_numpy(), pr_fc))
+                except Exception:
+                    metrics["Prophet"].append(np.nan)
+
+        # Summaries (MAPE/MAE/RMSE using concatenated preds for fairness)
+        def concat_eval(model_name):
+            preds, trues = [], []
+            for w in range(windows, 0, -1):
+                split = n - w*step
+                train = ts.iloc[:split].asfreq("D").ffill()
+                test = ts.iloc[split:split+step]
+                if model_name == "Holt-Winters":
+                    yhat = self._holt_forecast(train, step)
+                elif model_name == "ARIMA":
+                    yhat = self._arima_forecast(train, step)
+                else:
+                    dfp = pd.DataFrame({"ds": train.index, "y": train.values})
+                    yhat = self._prophet_forecast(dfp, step)
+                preds.append(np.asarray(yhat)); trues.append(test.to_numpy())
+            yhat_all, ytrue_all = np.concatenate(preds), np.concatenate(trues)
+            return ts_metrics(ytrue_all, yhat_all)
+
+        table = {}
+        for m in ["Holt-Winters","ARIMA"] + (["Prophet"] if _HAS_PROPHET else []):
+            try:
+                table[m] = concat_eval(m)
+            except Exception:
+                table[m] = {"MAPE%": np.nan, "MAE": np.nan, "RMSE": np.nan}
+        return table
 
     async def run_async(self, fn, *args, **kwargs):
         loop = asyncio.get_event_loop()
@@ -385,7 +520,7 @@ def plot_anoms(an_df: pd.DataFrame, title: str):
         fig.add_trace(go.Scatter(x=flag["ds"], y=flag["y"], mode="markers", name="Anomaly",
                                  marker=dict(size=10, symbol="x")))
     fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 # ---------------- LOS HELPERS ----------------
 def los_bucket(days: float) -> str:
@@ -405,7 +540,6 @@ def los_prep(data: pd.DataFrame):
     for c in num_cols:
         d[c] = pd.to_numeric(d[c], errors="coerce").fillna(d[c].median())
 
-    # Categorical columns — compatibility for older sklearn
     try:
         ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
     except TypeError:
@@ -421,7 +555,7 @@ def los_prep(data: pd.DataFrame):
 
 # ---------------- Circuit Breaker for External APIs ----------------
 class CircuitBreaker:
-    def __init__(self, failure_threshold=3, timeout=60):
+    def __init__(self, failure_threshold=3, timeout=90):
         self.failure_threshold = failure_threshold
         self.timeout = timeout
         self.failure_count = 0
@@ -450,12 +584,11 @@ class CircuitBreaker:
 if "cb_ai" not in st.session_state:
     st.session_state["cb_ai"] = CircuitBreaker(failure_threshold=3, timeout=90)
 
-# ---------------- AI (only models you have) ----------------
+# ---------------- AI (OpenAI) ----------------
 _ALLOWED_MODELS = [
     (st.secrets.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL") or "").strip(),
-    "gpt-4", "gpt-3.5-turbo"
+    "gpt-4o-mini", "gpt-4o", "gpt-4", "gpt-3.5-turbo"
 ]
-# Keep only non-empty unique values preserving order
 _seen=set(); _MODEL_PREFS=[m for m in _ALLOWED_MODELS if m and (m not in _seen and not _seen.add(m))]
 AI_MODEL = _MODEL_PREFS[0] if _MODEL_PREFS else "gpt-3.5-turbo"
 
@@ -474,73 +607,76 @@ def _get_openai_client():
         logger.error("openai_init_failed", error=str(e))
         return None
 
-def _try_completion(client, model, prompt):
-    try:
-        return st.session_state["cb_ai"].call(
-            client.chat.completions.create,
-            model=model,
-            messages=[
-                {"role": "system", "content": "Be precise, concise, and actionable. Avoid marketing fluff."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            max_tokens=200
-        )
-    except Exception as e:
-        if "does not have access to model" in str(e) or "model_not_found" in str(e):
-            logger.warning("model_access_denied", model=model, error=str(e))
-            raise RuntimeError(f"Model {model} not accessible")
-        raise e
+def _try_completion(client, model, messages, temperature=0.2, max_tokens=450):
+    return st.session_state["cb_ai"].call(
+        client.chat.completions.create,
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens
+    )
+
+def _truncate_json(d: dict, limit: int = 6000) -> str:
+    s = json.dumps(d, default=str)
+    return (s[:limit] + "…") if len(s) > limit else s
 
 def ai_write(section_title: str, payload: dict):
+    """Polished executive/analyst narratives with safe fallbacks, never crash."""
     client = _get_openai_client()
-    use_ai = AI_TOGGLE and (client is not None)
+    use_ai_default = AI_TOGGLE and (client is not None)
     col1, col2 = st.columns([1, 2])
-    use_ai = col1.checkbox(f"Use AI for {section_title}", value=use_ai, key=f"ai_use_{section_title}")
+    use_ai = col1.checkbox(f"Use AI for {section_title}", value=use_ai_default, key=f"ai_use_{section_title}")
     analyst = col2.toggle("Analyst mode (more detail)", value=False, key=f"ai_mode_{section_title}")
 
-    if use_ai and client:
-        prompt = textwrap.dedent(f"""
-        You are a product-analytics writer for a hospital ops platform.
-        Audience: hospital leaders. Tone: crisp, actionable, non-technical.
-        Write a concise {'executive' if not analyst else 'analyst-grade'} narrative for "{section_title}" (140–220 words).
-        Use ONLY this JSON: {json.dumps(payload, default=str)[:6000]}
-        Include:
-          1) What the results imply for operations ("what / so-what / now-what"),
-          2) A short "Performance & Use Case" table,
-          3) 3–5 concrete recommendations (owners and suggested SLAs).
-        """).strip()
+    # Polished prompts
+    voice = "Executive Summary" if not analyst else "Analyst Report"
+    sys_msg = (
+        "You are a healthcare analytics writer. Be clear, factual, and business-focused. "
+        "Avoid buzzwords. Produce tidy markdown."
+    )
+    content = textwrap.dedent(f"""
+    Create a {voice} for **{section_title}** from the JSON below. Two audiences:
 
+    1) **Executives** — What, So-What, Now-What. Crisp, 5–7 bullet points max.
+    2) **Operations** — next steps with owners and target due dates.
+    3) **Performance & Use Cases** — a compact markdown table (2–5 rows).
+    4) **Risk/Watchlist** — 2–4 bullets, if relevant.
+
+    Style:
+    - Start with a one-paragraph headline takeaway in bold.
+    - Use short sentences and numbers (e.g., “↑12% WoW”).
+    - Keep under 220 words for Executive mode; up to 350 for Analyst mode.
+
+    JSON (trimmed): { _truncate_json(payload, 5500) }
+    """).strip()
+
+    if use_ai and client:
+        messages = [
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": content},
+        ]
         tried = []
-        for mdl in [AI_MODEL] + [m for m in ["gpt-4","gpt-3.5-turbo"] if m != AI_MODEL]:
+        for mdl in _MODEL_PREFS:
             try:
-                rsp = _try_completion(client, mdl, prompt)
+                rsp = _try_completion(client, mdl, messages, temperature=0.25, max_tokens=350 if not analyst else 550)
                 st.markdown(rsp.choices[0].message.content)
                 with st.expander("AI diagnostics", expanded=False):
                     st.caption(f"Model: `{mdl}`")
                 return
-            except RuntimeError as e:
-                tried.append(f"{mdl} (access denied)")
             except Exception as e:
-                tried.append(f"{mdl} ({type(e).__name__})")
+                tried.append(f"{mdl}: {type(e).__name__}")
         with st.expander("AI unavailable (showing deterministic summary)"):
-            st.caption("Tried models: " + " → ".join(tried))
+            st.caption("Tried: " + " | ".join(tried))
 
     # Deterministic fallback
-    st.markdown(f"**Deterministic summary ({section_title})**")
+    st.markdown(f"**Deterministic summary — {section_title}**")
+    st.markdown("""
+<div class="exec-box">
+<b>Headline:</b> Platform generated summary is unavailable. Use the operational details below to brief the team.
+</div>
+""", unsafe_allow_html=True)
     st.json(payload)
-    st.caption("ℹ️ Set OPENAI_API_KEY and optionally OPENAI_MODEL (gpt-4 or gpt-3.5-turbo).")
-
-# ---------------- SAFETY WRAPPER ----------------
-from contextlib import contextmanager
-@contextmanager
-def safe_zone(label: str):
-    try:
-        yield
-    except Exception as e:
-        logger.error("section_error", section=label, error=str(e))
-        st.error(f"{label}: something went wrong.")
-        st.exception(e)
+    st.caption("ℹ️ Set OPENAI_API_KEY and optionally OPENAI_MODEL to enable narratives.")
 
 # ---------------- ACTION FOOTER + DECISION LOG ----------------
 if "decision_log" not in st.session_state:
@@ -574,31 +710,14 @@ def action_footer(section: str):
         key=f"dl_{section}"
     )
 
-# ---------------- Progressive UI ----------------
-class ProgressiveUI:
-    @staticmethod
-    def lazy_component(component_name: str, load_func):
-        placeholder = st.empty()
-        if placeholder.button(f"Load {component_name}", key=f"btn_{component_name}"):
-            with st.spinner(f"Loading {component_name}..."):
-                placeholder.empty()
-                return load_func()
-        else:
-            st.info(f"Click to load {component_name}")
-            return None
-
-# ---------------- MINI TOP-NAV (backup) ----------------
+# ---------------- MINI TOP-NAV (segmented if available) ----------------
 nav_labels = ["📈 Admissions Control","🧾 Revenue Watch","🛏️ LOS Planner"]
 nav = st.segmented_control("Quick nav", nav_labels, selection_mode="single", key="seg_nav") \
       if hasattr(st, "segmented_control") else None
 if nav:
-    st.markdown(
-        '<div class="navbar">' +
-        "".join([f'<div class="pill {"active" if lab==nav else ""}">{lab}</div>' for lab in nav_labels]) +
-        "</div>", unsafe_allow_html=True
-    )
+    st.caption(f"Viewing: {nav}")
 
-# ---------------- TABS ----------------
+# ---------------- TABS (top-level, always render) ----------------
 tabs = st.tabs(nav_labels)
 
 # ===== 1) Admissions Control =====
@@ -623,67 +742,74 @@ with tabs[0], safe_zone("Admissions Control"):
     if ts.empty:
         st.info("No admissions series for the current cohort/filters.")
     else:
-        def _render_calendar():
+        # Calendar view (lazy)
+        with st.expander("Seasonality calendar (avg admissions by week-of-year × weekday)"):
             s = fdx.set_index("admit_date").assign(_one=1)["_one"].resample("D").sum().fillna(0.0)
             cal = pd.DataFrame({"dow": s.index.weekday, "woy": s.index.isocalendar().week.values, "val": s.values})
             heat = cal.groupby(["woy","dow"])["val"].mean().reset_index()
             heat_pivot = heat.pivot(index="woy", columns="dow", values="val").fillna(0)
             fig = px.imshow(heat_pivot, aspect="auto", labels=dict(x="Weekday (0=Mon)", y="Week of Year", color="Avg admits"))
             fig.update_layout(height=360, margin=dict(l=10,r=10,b=10,t=30))
-            st.plotly_chart(fig, width="stretch")
-        with st.expander("Seasonality calendar (avg admissions by week-of-year × weekday)"):
-            ProgressiveUI.lazy_component("Seasonality Calendar", _render_calendar)
+            st.plotly_chart(fig, use_container_width=True)
 
         sc1, sc2 = st.columns(2)
         flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5, key="adm_flu")
         weather_pct = sc2.slider("Weather impact (±%)", -20, 20, 0, 5, key="adm_wthr")
 
-        fc = model_mgr.forecast_one(ts, horizon=horizon)
+        # ---- Forecast (multiple models) ----
+        fc_dict = model_mgr.forecast_all(ts, horizon=horizon)
         adj_factor = (100 + flu_pct + weather_pct) / 100.0
-        fc_adj = fc.assign(yhat=fc["yhat"] * adj_factor)
-
+        # Plot
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=ts["ds"], y=ts["y"], name="History", mode="lines"))
-        fig.add_trace(go.Scatter(x=fc_adj["ds"], y=fc_adj["yhat"], name="Holt-Winters (adj.)", mode="lines"))
-        fig.update_layout(title=f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'}",
-                          height=420, margin=dict(l=10,r=10,b=10,t=50))
-        st.plotly_chart(fig, width="stretch")
+        for name, fc in fc_dict.items():
+            fig.add_trace(go.Scatter(x=fc["ds"], y=fc["yhat"]*adj_factor, name=name, mode="lines"))
+        fig.update_layout(
+            title=f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'}",
+            height=420, margin=dict(l=10,r=10,b=10,t=50)
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-        # Backtest (simple rolling)
+        # ---- Backtests & Model Comparison ----
         try:
             s = ts.set_index("ds")["y"].asfreq("D").ffill()
             H = min(14, horizon)
-            preds, trues = [], []
-            if len(s) >= 4*H + 10:
-                for i in range(3,0,-1):
-                    split = len(s) - i*H
-                    train = s.iloc[:split]; test = s.iloc[split:split+H]
-                    yhat = model_mgr._holt_forecast(train, H)
-                    preds.append(np.asarray(yhat)); trues.append(test.to_numpy())
-                yhat_bt, ytrue_bt = np.concatenate(preds), np.concatenate(trues)
-                bt_tbl = pd.DataFrame([ts_metrics(ytrue_bt, yhat_bt)], index=["Holt-Winters"])
-                st.markdown("#### 📊 Model Performance (backtests)")
-                st.markdown(style_lower_better(bt_tbl), unsafe_allow_html=True)
-                st.caption("Lower is better. Green → Red indicates rank per metric.")
+            table = model_mgr.backtest(s, H, windows=3)
+            comp = pd.DataFrame(table).T[["MAPE%","MAE","RMSE"]]
+            st.markdown("#### 🧪 Model Comparison (rolling backtests)")
+            st.markdown(style_lower_better(comp), unsafe_allow_html=True)
+            st.caption("Lower is better. Shading ranks performance within each metric (greener = better).")
+            # Select best model by MAPE first, then RMSE
+            comp_rank = comp.rank(ascending=True, method="min")
+            best = comp_rank.sum(axis=1).sort_values().index[0]
         except Exception as e:
             logger.warning("backtest_failed", error=str(e))
+            best = "Holt-Winters"
 
+        st.markdown(f"**Selected model:** `{best}` (based on backtest ranks)")
+        best_fc = fc_dict.get(best, next(iter(fc_dict.values())))
+        daily_fc = (best_fc["yhat"] * adj_factor).to_numpy()
+
+        # Staffing heuristic
         st.markdown("#### Staffing targets (illustrative heuristic)")
-        daily_fc = fc_adj["yhat"].to_numpy()
         rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)
         targets = pd.DataFrame({
-            "Date": pd.to_datetime(fc_adj["ds"]).dt.date,
+            "Date": pd.to_datetime(best_fc["ds"]).dt.date,
             "Expected Admissions": np.round(daily_fc, 1),
             "RN/Day": rn_per_shift, "RN/Evening": rn_per_shift, "RN/Night": rn_per_shift
         })
-        st.dataframe(targets, width="stretch", hide_index=True)
+        st.dataframe(targets, use_container_width=True, hide_index=True)
 
+        # AI narrative
         ai_payload = {
             "cohort": {"dimension": cohort_dim, "value": cohort_val},
-            "aggregation": agg,
-            "horizon_days": horizon,
+            "aggregation": agg, "horizon_days": horizon,
             "scenario": {"flu_pct": flu_pct, "weather_pct": weather_pct},
-            "model": "Holt-Winters",
+            "models": list(fc_dict.keys()), "selected_model": best,
+            "kpis": {
+                "next_7d_avg_admits": float(np.mean(daily_fc[:min(7,len(daily_fc))])) if len(daily_fc) else 0.0,
+                "peak_next_30d": float(np.max(daily_fc[:min(30,len(daily_fc))])) if len(daily_fc) else 0.0
+            }
         }
         st.markdown("---")
         ai_write("Admissions Control", ai_payload)
@@ -724,8 +850,7 @@ with tabs[1], safe_zone("Revenue Watch"):
                     encounters=("billing_amount","count"),
                     anomaly_days=("is_anom_day","sum")
                 ).reset_index().sort_values("anomaly_days", ascending=False)
-
-                st.dataframe(grp, width="stretch")
+                st.dataframe(grp, use_container_width=True)
             else:
                 st.info("No anomalies available for drilldown in the current window.")
 
@@ -738,7 +863,7 @@ with tabs[1], safe_zone("Revenue Watch"):
                 else:
                     st.dataframe(
                         flagged[["ds","y","rzs","score"]].rename(columns={"ds":"When","y":"Value"}),
-                        width="stretch"
+                        use_container_width=True
                     )
         else:
             st.info("No recent anomalies to display.")
@@ -748,7 +873,7 @@ with tabs[1], safe_zone("Revenue Watch"):
         "sensitivity": sensitivity,
         "baseline_weeks": baseline_weeks,
         "recent_window": 30,
-        "recent_points": int(len(an.tail(30))) if isinstance(an, pd.DataFrame) and not an.empty else 0,
+        "recent_points": int(an.tail(30).shape[0]) if isinstance(an, pd.DataFrame) and not an.empty else 0,
         "recent_anomalies": int(an.tail(30)["anomaly"].sum()) if isinstance(an, pd.DataFrame) and not an.empty else 0,
         "max_severity_score": (
             float(an.tail(30).loc[an.tail(30)["anomaly"], "score"].max())
@@ -832,7 +957,7 @@ with tabs[2], safe_zone("LOS Planner"):
 
         st.markdown("#### 📊 Model Performance (Classification)")
         st.markdown(style_higher_better(perf), unsafe_allow_html=True)
-        st.caption("Higher is better. Green → Red indicates rank per metric.")
+        st.caption("Higher is better. Shading ranks performance within each metric (greener = better).")
 
         def _render_roc():
             top_model = perf["F1"].astype(float).idxmax()
@@ -843,13 +968,13 @@ with tabs[2], safe_zone("LOS Planner"):
                     fig.add_trace(go.Scatter(x=fprs[cls], y=tprs[cls], mode="lines", name=f"{top_model} — {cls}"))
             fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Chance", line=dict(dash="dash")))
             fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
         with st.expander("ROC Curves (one-vs-rest)"):
-            ProgressiveUI.lazy_component("ROC Curves", _render_roc)
+            _render_roc()
 
         st.markdown("#### Equity slices")
         slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
-        slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if "insurer" in slice_dim_options else 0, key="los_slice") if slice_dim_options else None
+        slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if slice_dim_options else 0, key="los_slice") if slice_dim_options else None
         if slice_dim:
             top_model = perf["F1"].astype(float).idxmax()
             best_pipe = models[top_model]
@@ -861,7 +986,7 @@ with tabs[2], safe_zone("LOS Planner"):
                 mask = (slice_vals==sv)
                 acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
                 grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
-            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width="stretch")
+            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), use_container_width=True)
 
         ai_payload = {
             "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
@@ -878,7 +1003,7 @@ with st.expander("Decision Log (peek)"):
     if df_log.empty:
         st.info("No decisions logged yet.")
     else:
-        st.dataframe(df_log, width="stretch")
+        st.dataframe(df_log, use_container_width=True)
         st.download_button(
             label="Download Decision Log (CSV)",
             data=df_log.to_csv(index=False).encode("utf-8"),
