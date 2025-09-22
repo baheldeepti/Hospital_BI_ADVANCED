@@ -209,18 +209,19 @@ def load_data_chunked_cached(url: str, chunk_size: int = 10000) -> pd.DataFrame:
 data_mgr = HospitalDataManager()
 df = data_mgr.load_data_chunked(RAW_URL)
 # Optional upload override
+# Optional upload override
 with st.expander("Data source (optional override)"):
-up = st.file_uploader("Upload CSV to override default", type=["csv"], key="upload_csv")
-if up is not None:
-try:
-df = pd.read_csv(up)
-df = data_mgr._normalize_columns(df)
-df = data_mgr._coerce_types(df)
-df = df.dropna(subset=["admit_date"])
-df = data_mgr._feature_engineer(df)
-st.success(f"Loaded {len(df):,} rows from upload.")
-except Exception as e:
-st.error(f"Failed to read uploaded CSV: {e}")
+    up = st.file_uploader("Upload CSV to override default", type=["csv"], key="upload_csv")
+    if up is not None:
+        try:
+            df = pd.read_csv(up)
+            df = data_mgr._normalize_columns(df)
+            df = data_mgr._coerce_types(df)
+            df = df.dropna(subset=["admit_date"])
+            df = data_mgr._feature_engineer(df)
+            st.success(f"Loaded {len(df):,} rows from upload.")
+        except Exception as e:
+            st.error(f"Failed to read uploaded CSV: {e}")
 # Data Quality Monitor 
 class DataQualityMonitor:
 def _detect_outliers(self, df: pd.DataFrame) -> Dict[str, int]:
