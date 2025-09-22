@@ -534,7 +534,7 @@ def los_prep(data: pd.DataFrame):
 class CircuitBreaker:
     def __init__(self, failure_threshold=3, timeout=90):
         self.failure_threshold = failure_threshold
-        self.timeout = timeout
+               self.timeout = timeout
         self.failure_count = 0
         self.last_failure_time: Optional[datetime] = None
 
@@ -564,7 +564,7 @@ if "cb_ai" not in st.session_state:
 # ---------------- AI (OpenAI) ----------------
 _ALLOWED_MODELS = [
     (st.secrets.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL") or "").strip(),
-    "gpt-4o-mini", "gpt-4o", "gpt-4", "gpt-3.5-turbo"
+    "gpt-4", "gpt-3.5-turbo"
 ]
 _seen=set(); _MODEL_PREFS=[m for m in _ALLOWED_MODELS if m and (m not in _seen and not _seen.add(m))]
 AI_MODEL = _MODEL_PREFS[0] if _MODEL_PREFS else "gpt-3.5-turbo"
@@ -650,6 +650,10 @@ def ai_write(section_title: str, payload: dict):
     st.json(payload)
     st.caption("ℹ️ Set OPENAI_API_KEY and optionally OPENAI_MODEL to enable narratives.")
 
+# ---------------- ACTION FOOTER + DECISION LOG ----------------
+if "decision_log" not in st.session_state:
+    st.session_state["decision_log"] = []
+
 def action_footer(section: str):
     st.markdown("#### Action footer")
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
@@ -685,3 +689,250 @@ def action_footer(section: str):
         mime="text/csv",
         key=f"dl_{section}",
     )
+
+# ---------------- TABS (top-level) ----------------
+tabs = st.tabs(["📈 Admissions Control","🧾 Revenue Watch","🛏️ LOS Planner"])
+
+# ===== 1) Admissions Control =====
+with tabs[0], safe_zone("Admissions Control"):
+    st.subheader("📈 Admissions Control — Forecast → Staffing Targets")
+    c1, c2, c3, c4 = st.columns(4)
+    cohort_dim = c1.selectbox("Cohort dimension", ["All","hospital","insurer","condition"], key="adm_dim")
+    cohort_val = c2.selectbox(
+        "Cohort value",
+        ["(all)"] + (sorted(fdf[cohort_dim].dropna().unique().tolist()) if cohort_dim!="All" and cohort_dim in fdf else []),
+        key="adm_val",
+    )
+    agg = c3.selectbox("Aggregation", ["Daily","Weekly"], index=0, key="adm_agg")
+    horizon = c4.slider("Forecast horizon (days)", 7, 90, 30, key="adm_hz")
+    freq = "D" if agg=="Daily" else "W"
+
+    fdx = fdf.copy()
+    if cohort_dim!="All" and cohort_dim in fdx and cohort_val and cohort_val!="(all)":
+        fdx = fdx[fdx[cohort_dim]==cohort_val]
+
+    ts = build_timeseries(fdx, metric="intake", freq=freq)
+    if ts.empty:
+        st.info("No admissions series for the current cohort/filters.")
+    else:
+        with st.expander("Seasonality calendar (avg admissions by week-of-year × weekday)"):
+            s = fdx.set_index("admit_date").assign(_one=1)["_one"].resample("D").sum().fillna(0.0)
+            cal = pd.DataFrame({"dow": s.index.weekday, "woy": s.index.isocalendar().week.values, "val": s.values})
+            heat = cal.groupby(["woy","dow"])["val"].mean().reset_index()
+            heat_pivot = heat.pivot(index="woy", columns="dow", values="val").fillna(0)
+            fig = px.imshow(heat_pivot, aspect="auto",
+                            labels=dict(x="Weekday (0=Mon)", y="Week of Year", color="Avg admits"))
+            fig.update_layout(height=360, margin=dict(l=10,r=10,b=10,t=30))
+            st.plotly_chart(fig, width="stretch")
+
+        sc1, sc2 = st.columns(2)
+        flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5, key="adm_flu")
+        weather_pct = sc2.slider("Weather impact (±%)", -20, 20, 0, 5, key="adm_wthr")
+
+        fc_dict = model_mgr.forecast_all(ts, horizon=horizon)
+        adj_factor = (100 + flu_pct + weather_pct) / 100.0
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=ts["ds"], y=ts["y"], name="History", mode="lines"))
+        for name, fc in fc_dict.items():
+            fig.add_trace(go.Scatter(x=fc["ds"], y=fc["yhat"]*adj_factor, name=name, mode="lines"))
+        fig.update_layout(title="Admissions Forecast", height=420, margin=dict(l=10,r=10,b=10,t=50))
+        st.plotly_chart(fig, width="stretch")
+
+        # Backtests & selection
+        try:
+            s = ts.set_index("ds")["y"].asfreq("D").ffill()
+            H = min(14, horizon)
+            table = model_mgr.backtest(s, H, windows=3)
+            comp = pd.DataFrame(table).T[["MAPE%","MAE","RMSE"]]
+            st.markdown("#### 🧪 Model Comparison (rolling backtests)")
+            st.markdown(style_lower_better(comp), unsafe_allow_html=True)
+            comp_rank = comp.rank(ascending=True, method="min")
+            best = comp_rank.sum(axis=1).sort_values().index[0]
+        except Exception:
+            best = "Holt-Winters"
+
+        st.markdown(f"**Selected model:** `{best}`")
+        best_fc = fc_dict.get(best, next(iter(fc_dict.values())))
+        daily_fc = (best_fc["yhat"] * adj_factor).to_numpy()
+
+        st.markdown("#### Staffing targets (illustrative)")
+        rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)
+        targets = pd.DataFrame({
+            "Date": pd.to_datetime(best_fc["ds"]).dt.date,
+            "Expected Admissions": np.round(daily_fc, 1),
+            "RN/Day": rn_per_shift, "RN/Evening": rn_per_shift, "RN/Night": rn_per_shift
+        })
+        st.dataframe(targets, width="stretch", hide_index=True)
+
+        ai_payload = {"cohort": {"dimension": cohort_dim, "value": cohort_val},
+                      "aggregation": agg, "horizon_days": horizon,
+                      "scenario": {"flu_pct": flu_pct, "weather_pct": weather_pct},
+                      "models": list(fc_dict.keys()), "selected_model": best}
+        st.markdown("---")
+        ai_write("Admissions Control", ai_payload)
+        action_footer("Admissions Control")
+
+# ===== 2) Revenue Watch =====
+with tabs[1], safe_zone("Revenue Watch"):
+    st.subheader("🧾 Revenue Watch — Anomalies → Cash Protection")
+    c1, c2, c3 = st.columns(3)
+    agg = c1.selectbox("Aggregation", ["Daily","Weekly"], index=0, key="bill_agg")
+    sensitivity = c2.slider("Sensitivity (higher = fewer alerts)", 1.5, 5.0, 3.0, 0.1, key="bill_sens")
+    baseline_weeks = c3.slider("Baseline window (weeks)", 2, 12, 4, 1, key="bill_base")
+    freq = "D" if agg=="Daily" else "W"
+
+    ts_bill = build_timeseries(fdf, metric="billing_amount", freq=freq)
+    if ts_bill.empty:
+        st.info("No billing series for the current filters.")
+        an = None
+    else:
+        an = detect_anomalies(ts_bill, sensitivity)
+        plot_anoms(an, "Billing Amount with Anomalies")
+
+        st.markdown("#### Root-cause explorer")
+        dims = [d for d in ["insurer","hospital","condition","doctor"] if d in fdf.columns]
+        if dims:
+            drill = st.selectbox("Group anomalies by", dims, index=0, key="bill_drill")
+            fdf_agg = fdf.set_index("admit_date")
+            if isinstance(an, pd.DataFrame) and not an.empty:
+                an_days = set(pd.to_datetime(an.loc[an["anomaly"], "ds"]).dt.date.tolist())
+                fdf_agg["is_anom_day"] = pd.Series(fdf_agg.index.date, index=fdf_agg.index).isin(an_days).astype(int)
+                grp = fdf_agg.groupby(drill).agg(
+                    billing_total=("billing_amount","sum"),
+                    encounters=("billing_amount","count"),
+                    anomaly_days=("is_anom_day","sum")
+                ).reset_index().sort_values("anomaly_days", ascending=False)
+                st.dataframe(grp, width="stretch")
+
+    ai_payload = {"aggregation": agg, "sensitivity": sensitivity, "baseline_weeks": baseline_weeks}
+    st.markdown("---")
+    ai_write("Revenue Watch", ai_payload)
+    action_footer("Revenue Watch")
+
+# ===== 3) LOS Planner =====
+with tabs[2], safe_zone("LOS Planner"):
+    st.subheader("🛏️ LOS Planner — Risk Buckets → Discharge Orchestration")
+    prep = los_prep(fdf)
+    if prep is None:
+        st.info("`length_of_stay` not found.")
+    else:
+        X, y, num_cols, cat_cols, d_full, ohe = prep
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.25, random_state=42, stratify=y
+            )
+        except Exception:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+
+        pre = ColumnTransformer(
+            transformers=[
+                ("num", StandardScaler(), [c for c in num_cols if c in X.columns]),
+                ("cat", ohe, [c for c in cat_cols if c in X.columns]),
+            ],
+            remainder="drop"
+        )
+
+        models = {
+            "Logistic Regression": Pipeline([("pre", pre), ("clf", LogisticRegression(max_iter=600, multi_class="multinomial"))]),
+            "Random Forest": Pipeline([("pre", pre), ("clf", RandomForestClassifier(n_estimators=400, random_state=42))]),
+        }
+        if _HAS_XGB:
+            models["XGBoost (optional)"] = Pipeline([("pre", pre), ("clf", XGBClassifier(
+                n_estimators=500, learning_rate=0.05, max_depth=6, subsample=0.9, colsample_bytree=0.9,
+                objective="multi:softprob", eval_metric="mlogloss", random_state=42
+            ))])
+
+        classes = sorted(y.dropna().unique().tolist())
+        results, roc_curves = {}, {}
+        for name, pipe in models.items():
+            pipe.fit(X_train, y_train)
+            y_pred = pipe.predict(X_test)
+            try:
+                y_proba = pipe.predict_proba(X_test)
+            except Exception:
+                y_proba = None
+            acc = accuracy_score(y_test, y_pred)
+            pr, rc, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="weighted", zero_division=0)
+            auc = None; fprs={}; tprs={}
+            if (y_proba is not None) and (len(np.unique(y_test.dropna())) >= 2):
+                try:
+                    y_test_b = label_binarize(y_test, classes=classes)
+                    if y_proba.shape[1] == len(classes):
+                        auc = roc_auc_score(y_test_b, y_proba, average="weighted", multi_class="ovr")
+                        for i, cls in enumerate(classes):
+                            fpr, tpr, _ = roc_curve(y_test_b[:, i], y_proba[:, i])
+                            fprs[cls] = fpr; tprs[cls] = tpr
+                except Exception:
+                    pass
+            results[name] = {"Accuracy": acc, "Precision": pr, "Recall": rc, "F1": f1, "ROC-AUC": auc}
+            roc_curves[name] = (fprs, tprs)
+
+        perf = pd.DataFrame(results).T
+        for c in ["Accuracy","Precision","Recall","F1","ROC-AUC"]:
+            if c not in perf: perf[c] = np.nan
+        perf = perf[["Accuracy","Precision","Recall","F1","ROC-AUC"]]
+        st.markdown("#### 📊 Model Performance")
+        st.markdown(style_higher_better(perf), unsafe_allow_html=True)
+
+        def _render_roc():
+            # pick top model by F1 (when available)
+            try:
+                top_model = perf["F1"].astype(float).idxmax()
+            except Exception:
+                top_model = list(models.keys())[0]
+            fprs, tprs = roc_curves.get(top_model, ({}, {}))
+            if not fprs:
+                st.info("ROC not available.")
+                return
+            fig = go.Figure()
+            for cls in classes:
+                if cls in fprs and cls in tprs and len(fprs[cls]) and len(tprs[cls]):
+                    fig.add_trace(go.Scatter(x=fprs[cls], y=tprs[cls], mode="lines", name=f"{top_model} — {cls}"))
+            fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Chance", line=dict(dash="dash")))
+            fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
+            st.plotly_chart(fig, width="stretch")
+
+        with st.expander("ROC Curves (one-vs-rest)"):
+            _render_roc()
+
+        st.markdown("#### Equity slices")
+        slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
+        slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if slice_dim_options else 0, key="los_slice") if slice_dim_options else None
+        if slice_dim:
+            try:
+                top_model = perf["F1"].astype(float).idxmax()
+            except Exception:
+                top_model = list(models.keys())[0]
+            best_pipe = models[top_model]
+            X_test_idx = X_test.index
+            slice_vals = d_full.loc[X_test_idx, slice_dim].fillna("Unknown")
+            y_pred_best = best_pipe.predict(X_test)
+            grp_rows = []
+            for sv in sorted(pd.Series(slice_vals).unique().tolist()):
+                mask = (slice_vals==sv)
+                acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
+                grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
+            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width="stretch")
+
+        ai_payload = {"buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
+                      "metrics_table": perf.to_dict(),
+                      "equity_slice": slice_dim}
+        st.markdown("---")
+        ai_write("LOS Planner", ai_payload)
+        action_footer("LOS Planner")
+
+# --------------- FOOTER: Decision Log quick peek ---------------
+with st.expander("Decision Log (peek)"):
+    df_log = pd.DataFrame(st.session_state["decision_log"])
+    if df_log.empty:
+        st.info("No decisions logged yet.")
+    else:
+        st.dataframe(df_log, width="stretch")
+        st.download_button(
+            label="Download Decision Log (CSV)",
+            data=df_log.to_csv(index=False).encode("utf-8"),
+            file_name="decision_log.csv",
+            mime="text/csv",
+            key="dl_footer"
+        )
