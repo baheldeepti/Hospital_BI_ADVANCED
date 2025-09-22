@@ -16,9 +16,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score, roc_curve
 try:
-from xgboost import XGBClassifier  
+    from xgboost import XGBClassifier  # type: ignore
+    _HAS_XGB = True
 except Exception:
-_HAS_XGB = False
+    _HAS_XGB = False
+
 #System & monitoring
 import psutil
 import structlog
