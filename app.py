@@ -520,7 +520,7 @@ def plot_anoms(an_df: pd.DataFrame, title: str):
         fig.add_trace(go.Scatter(x=flag["ds"], y=flag["y"], mode="markers", name="Anomaly",
                                  marker=dict(size=10, symbol="x")))
     fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch)
 
 # ---------------- LOS HELPERS ----------------
 def los_bucket(days: float) -> str:
@@ -750,7 +750,7 @@ with tabs[0], safe_zone("Admissions Control"):
             heat_pivot = heat.pivot(index="woy", columns="dow", values="val").fillna(0)
             fig = px.imshow(heat_pivot, aspect="auto", labels=dict(x="Weekday (0=Mon)", y="Week of Year", color="Avg admits"))
             fig.update_layout(height=360, margin=dict(l=10,r=10,b=10,t=30))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch)
 
         sc1, sc2 = st.columns(2)
         flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5, key="adm_flu")
@@ -768,7 +768,7 @@ with tabs[0], safe_zone("Admissions Control"):
             title=f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'}",
             height=420, margin=dict(l=10,r=10,b=10,t=50)
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch)
 
         # ---- Backtests & Model Comparison ----
         try:
@@ -798,7 +798,7 @@ with tabs[0], safe_zone("Admissions Control"):
             "Expected Admissions": np.round(daily_fc, 1),
             "RN/Day": rn_per_shift, "RN/Evening": rn_per_shift, "RN/Night": rn_per_shift
         })
-        st.dataframe(targets, use_container_width=True, hide_index=True)
+        st.dataframe(targets, width='stretch, hide_index=True)
 
         # AI narrative
         ai_payload = {
@@ -850,7 +850,7 @@ with tabs[1], safe_zone("Revenue Watch"):
                     encounters=("billing_amount","count"),
                     anomaly_days=("is_anom_day","sum")
                 ).reset_index().sort_values("anomaly_days", ascending=False)
-                st.dataframe(grp, use_container_width=True)
+                st.dataframe(grp, width='stretch)
             else:
                 st.info("No anomalies available for drilldown in the current window.")
 
@@ -863,7 +863,7 @@ with tabs[1], safe_zone("Revenue Watch"):
                 else:
                     st.dataframe(
                         flagged[["ds","y","rzs","score"]].rename(columns={"ds":"When","y":"Value"}),
-                        use_container_width=True
+                        width='stretch
                     )
         else:
             st.info("No recent anomalies to display.")
@@ -968,7 +968,7 @@ with tabs[2], safe_zone("LOS Planner"):
                     fig.add_trace(go.Scatter(x=fprs[cls], y=tprs[cls], mode="lines", name=f"{top_model} — {cls}"))
             fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Chance", line=dict(dash="dash")))
             fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch)
         with st.expander("ROC Curves (one-vs-rest)"):
             _render_roc()
 
@@ -986,7 +986,7 @@ with tabs[2], safe_zone("LOS Planner"):
                 mask = (slice_vals==sv)
                 acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
                 grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
-            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), use_container_width=True)
+            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width='stretch)
 
         ai_payload = {
             "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
@@ -1003,7 +1003,7 @@ with st.expander("Decision Log (peek)"):
     if df_log.empty:
         st.info("No decisions logged yet.")
     else:
-        st.dataframe(df_log, use_container_width=True)
+        st.dataframe(df_log, width='stretch)
         st.download_button(
             label="Download Decision Log (CSV)",
             data=df_log.to_csv(index=False).encode("utf-8"),
