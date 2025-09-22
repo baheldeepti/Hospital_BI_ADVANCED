@@ -53,7 +53,6 @@ st.title("Hospital Ops Studio — Control Tower")
 st.caption("Admissions Control • Revenue Watch • LOS Planner — decisions first, dashboards second")
 #SIDEBAR SETTINGS
 with st.sidebar:
-with st.sidebar:
     st.header("Settings")
     AI_TOGGLE = st.toggle("Enable AI narratives", value=True, key="ai_toggle")
     st.caption("Tip: configure OPENAI_API_KEY and OPENAI_MODEL in Secrets.")
