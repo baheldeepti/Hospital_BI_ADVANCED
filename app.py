@@ -189,26 +189,26 @@ def load_data_chunked(self, url: str, chunk_size: int = 10000) -> pd.DataFrame:
 # Create a standalone cached function
 @st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
 def load_data_chunked_cached(url: str, chunk_size: int = 10000) -> pd.DataFrame:
-try:
-chunks = []
-for chunk in pd.read_csv(url, chunksize=chunk_size):
-chunk = HospitalDataManager._normalize_columns(chunk)
-chunk = HospitalDataManager._coerce_types(chunk)
-chunk = HospitalDataManager._validate_chunk(chunk)
-chunks.append(chunk)
-if not chunks:
-return HospitalDataManager._get_fallback_data()
-df = pd.concat(chunks, ignore_index=True)
-df = HospitalDataManager._feature_engineer(df)
-logger.info("data_loaded", rows=len(df))
-return df
-except Exception as e:
-logger.error("data_load_failed", error=str(e))
-st.error(f"Data load failed. Using fallback dataset. Details: {e}")
-return HospitalDataManager._get_fallback_data()
+    try:
+        chunks = []
+        for chunk in pd.read_csv(url, chunksize=chunk_size):
+            chunk = HospitalDataManager._normalize_columns(chunk)
+            chunk = HospitalDataManager._coerce_types(chunk)
+            chunk = HospitalDataManager._validate_chunk(chunk)
+            chunks.append(chunk)
+        if not chunks:
+            return HospitalDataManager._get_fallback_data()
+        df = pd.concat(chunks, ignore_index=True)
+        df = HospitalDataManager._feature_engineer(df)
+        logger.info("data_loaded", rows=len(df))
+        return df
+    except Exception as e:
+        logger.error("data_load_failed", error=str(e))
+        st.error(f"Data load failed. Using fallback dataset. Details: {e}")
+        return HospitalDataManager._get_fallback_data()
 data_mgr = HospitalDataManager()
 df = data_mgr.load_data_chunked(RAW_URL)
-Optional upload override
+# Optional upload override
 with st.expander("Data source (optional override)"):
 up = st.file_uploader("Upload CSV to override default", type=["csv"], key="upload_csv")
 if up is not None:
