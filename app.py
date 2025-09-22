@@ -448,7 +448,7 @@ if "cb_ai" not in st.session_state:
 # Allow-list & fallback to avoid 403 model errors
 _ALLOWED_MODELS = [
     os.environ.get("OPENAI_MODEL", "").strip() or st.secrets.get("OPENAI_MODEL", "") or "",
-    "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"  # Changed "gpt-4.1-mini" to "gpt-4-turbo"
+    "gpt-4o-mini", "gpt-5", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"  # Changed "gpt-4.1-mini" to "gpt-4-turbo"
 ]
 AI_MODEL = next((m for m in _ALLOWED_MODELS if m), "gpt-3.5-turbo")
 
