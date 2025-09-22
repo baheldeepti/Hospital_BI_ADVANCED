@@ -448,7 +448,7 @@ if "cb_ai" not in st.session_state:
 # Allow-list & fallback to avoid 403 model errors
 _ALLOWED_MODELS = [
     os.environ.get("OPENAI_MODEL", "").strip() or st.secrets.get("OPENAI_MODEL", "") or "",
-    "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "gpt-3.5-turbo"
+    "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"  # Changed "gpt-4.1-mini" to "gpt-4-turbo"
 ]
 AI_MODEL = next((m for m in _ALLOWED_MODELS if m), "gpt-3.5-turbo")
 
@@ -468,15 +468,22 @@ def _get_openai_client():
         return None
 
 def _try_completion(client, model, prompt):
-    return st.session_state["cb_ai"].call(
-        client.chat.completions.create,
-        model=model,
-        messages=[
-            {"role": "system", "content": "Be precise, concise, and actionable. Avoid marketing fluff."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-    )
+    try:
+        return st.session_state["cb_ai"].call(
+            client.chat.completions.create,
+            model=model,
+            messages=[
+                {"role": "system", "content": "Be precise, concise, and actionable. Avoid marketing fluff."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+    except Exception as e:
+        # Check if it's a model access error
+        if "does not have access to model" in str(e) or "model_not_found" in str(e):
+            logger.warning("model_access_denied", model=model, error=str(e))
+            raise RuntimeError(f"Model {model} not accessible")
+        raise e
 
 def ai_write(section_title: str, payload: dict):
     client = _get_openai_client()
@@ -496,20 +503,29 @@ def ai_write(section_title: str, payload: dict):
           2) A short "Performance & Use Case" table,
           3) 3–5 concrete recommendations (owners and suggested SLAs).
         """).strip()
-        # Try the chosen model, then fall back through the allow-list
+        
+        # Try models with better error handling
         tried = []
-        for mdl in [AI_MODEL] + [m for m in _ALLOWED_MODELS if m and m != AI_MODEL]:
+        available_models = ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"]  # Use known available models
+        for mdl in [AI_MODEL] + [m for m in available_models if m and m != AI_MODEL]:
             try:
                 rsp = _try_completion(client, mdl, prompt)
                 st.markdown(rsp.choices[0].message.content)
                 with st.expander("AI diagnostics", expanded=False):
                     st.caption(f"Model: `{mdl}`")
                 return
+            except RuntimeError as e:
+                if "not accessible" in str(e):
+                    tried.append((mdl, "Access denied"))
+                    continue
+                tried.append((mdl, str(e)))
+                logger.warning("ai_call_failed", error=str(e))
             except Exception as e:
                 tried.append((mdl, str(e)))
                 logger.warning("ai_call_failed", error=str(e))
+                
         with st.expander("AI unavailable (showing deterministic summary)"):
-            st.caption("Tried models: " + " → ".join([m for m,_ in tried]))
+            st.caption("Tried models: " + " → ".join([f"{m} ({e})" for m, e in tried]))
 
     # Deterministic fallback
     st.markdown(f"**Deterministic summary ({section_title})**")
