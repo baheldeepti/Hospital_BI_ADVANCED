@@ -1,4 +1,4 @@
-# app.py — Hospital Ops Studio (single-model AI, robust & scalable)
+# app.py — Hospital Ops Studio (stable on Streamlit 1.49+, sklearn 1.5+, Python 3.11)
 
 import os, json, textwrap, asyncio, gc, logging, hashlib
 from datetime import datetime, date, timedelta
@@ -43,7 +43,7 @@ structlog.configure(
 )
 logger = structlog.get_logger()
 
-# ----------------- Styles (includes sticky tab bar) -----------------------
+# ----------------- Styles (sticky top tabs + clearer nav) -----------------------
 st.markdown("""
 <style>
 :root{
@@ -60,11 +60,19 @@ a {color:var(--teal)}
 .badge-alert{background:rgba(239,68,68,.12)}
 .small{color:var(--sub);font-size:0.9rem}
 hr{border-top:1px solid #eee}
-/* make the tab labels look like a top nav and keep them visible */
-.stTabs [data-baseweb="tab-list"]{
-  position: sticky; top: 0; z-index: 3; background: white; border-bottom: 1px solid #eee; margin-top: .25rem;
+
+/* Sticky tabs bar across Streamlit builds */
+.stTabs [data-baseweb="tab-list"],
+.stTabs div[role="tablist"]{
+  position: sticky; top: 0; z-index: 5; background: white;
+  border-bottom: 1px solid #eee; padding-top:.25rem; margin-top:.25rem;
 }
-.stTabs [data-baseweb="tab"]{font-weight:600}
+.stTabs [data-baseweb="tab"], .stTabs div[role="tab"]{font-weight:600}
+
+/* Optional mini top-nav */
+.navbar{display:flex; gap:.5rem; flex-wrap:wrap; margin:.2rem 0 .4rem 0}
+.navbar .pill{padding:.35rem .6rem; border:1px solid #e5e7eb; border-radius:999px; cursor:pointer}
+.navbar .pill.active{background:#0F4C81; color:#fff; border-color:#0F4C81}
 </style>
 """, unsafe_allow_html=True)
 
@@ -76,6 +84,7 @@ with st.sidebar:
     st.header("Settings")
     AI_TOGGLE = st.toggle("Enable AI narratives", value=True, key="ai_toggle")
     st.caption("Tip: configure OPENAI_API_KEY and OPENAI_MODEL in Secrets.")
+    # Resource monitor
     process = psutil.Process()
     mem_mb = process.memory_info().rss / 1024 / 1024
     st.metric("Memory (MB)", f"{mem_mb:.1f}")
@@ -184,11 +193,10 @@ class HospitalDataManager:
         df = self._coerce_types(self._feature_engineer(df))
         return df
 
-    # --- Cache: ignore `self` to avoid UnhashableParamError
+    # --- Cache: we make it static so Streamlit doesn't try to hash `self`
     @staticmethod
     @st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
     def load_data_chunked(url: str, chunk_size: int = 10000) -> pd.DataFrame:
-        # Create a temporary instance for processing
         temp_mgr = HospitalDataManager()
         try:
             chunks = []
@@ -207,8 +215,6 @@ class HospitalDataManager:
             logger.error("data_load_failed", error=str(e))
             st.error(f"Data load failed. Using fallback dataset. Details: {e}")
             return temp_mgr._get_fallback_data()
-
-
 
 data_mgr = HospitalDataManager()
 df = data_mgr.load_data_chunked(RAW_URL)
@@ -329,7 +335,7 @@ def style_higher_better(df: pd.DataFrame) -> str:
         styled = styled.apply(lambda s: [bg(col, s.name) for _ in s], axis=1)
     return styled.to_html()
 
-# ---------------- Model Manager (async-ready + cache) ----------------
+# ---------------- Model Manager (async-ready) ----------------
 class ModelManager:
     def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=2)
@@ -379,7 +385,7 @@ def plot_anoms(an_df: pd.DataFrame, title: str):
         fig.add_trace(go.Scatter(x=flag["ds"], y=flag["y"], mode="markers", name="Anomaly",
                                  marker=dict(size=10, symbol="x")))
     fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
-    st.plotly_chart(fig, width="stretch")  # ← new API
+    st.plotly_chart(fig, width="stretch")
 
 # ---------------- LOS HELPERS ----------------
 def los_bucket(days: float) -> str:
@@ -444,13 +450,14 @@ class CircuitBreaker:
 if "cb_ai" not in st.session_state:
     st.session_state["cb_ai"] = CircuitBreaker(failure_threshold=3, timeout=90)
 
-# ---------------- AI (single model, robust) ----------------
-# Allow-list & fallback to avoid 403 model errors
+# ---------------- AI (only models you have) ----------------
 _ALLOWED_MODELS = [
-    os.environ.get("OPENAI_MODEL", "").strip() or st.secrets.get("OPENAI_MODEL", "") or "",
-     "gpt-4", "gpt-3.5-turbo" 
+    (st.secrets.get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL") or "").strip(),
+    "gpt-4", "gpt-3.5-turbo"
 ]
-AI_MODEL = next((m for m in _ALLOWED_MODELS if m), "gpt-3.5-turbo")
+# Keep only non-empty unique values preserving order
+_seen=set(); _MODEL_PREFS=[m for m in _ALLOWED_MODELS if m and (m not in _seen and not _seen.add(m))]
+AI_MODEL = _MODEL_PREFS[0] if _MODEL_PREFS else "gpt-3.5-turbo"
 
 def _get_openai_client():
     key = (
@@ -477,9 +484,9 @@ def _try_completion(client, model, prompt):
                 {"role": "user", "content": prompt},
             ],
             temperature=0.2,
+            max_tokens=200
         )
     except Exception as e:
-        # Check if it's a model access error
         if "does not have access to model" in str(e) or "model_not_found" in str(e):
             logger.warning("model_access_denied", model=model, error=str(e))
             raise RuntimeError(f"Model {model} not accessible")
@@ -503,11 +510,9 @@ def ai_write(section_title: str, payload: dict):
           2) A short "Performance & Use Case" table,
           3) 3–5 concrete recommendations (owners and suggested SLAs).
         """).strip()
-        
-        # Try models with better error handling
+
         tried = []
-        available_models = ["gpt-3.5-turbo", "gpt-4"]  # Use known available models
-        for mdl in [AI_MODEL] + [m for m in available_models if m and m != AI_MODEL]:
+        for mdl in [AI_MODEL] + [m for m in ["gpt-4","gpt-3.5-turbo"] if m != AI_MODEL]:
             try:
                 rsp = _try_completion(client, mdl, prompt)
                 st.markdown(rsp.choices[0].message.content)
@@ -515,22 +520,16 @@ def ai_write(section_title: str, payload: dict):
                     st.caption(f"Model: `{mdl}`")
                 return
             except RuntimeError as e:
-                if "not accessible" in str(e):
-                    tried.append((mdl, "Access denied"))
-                    continue
-                tried.append((mdl, str(e)))
-                logger.warning("ai_call_failed", error=str(e))
+                tried.append(f"{mdl} (access denied)")
             except Exception as e:
-                tried.append((mdl, str(e)))
-                logger.warning("ai_call_failed", error=str(e))
-                
+                tried.append(f"{mdl} ({type(e).__name__})")
         with st.expander("AI unavailable (showing deterministic summary)"):
-            st.caption("Tried models: " + " → ".join([f"{m} ({e})" for m, e in tried]))
+            st.caption("Tried models: " + " → ".join(tried))
 
     # Deterministic fallback
     st.markdown(f"**Deterministic summary ({section_title})**")
     st.json(payload)
-    st.caption("ℹ️ To enable AI narratives, set OPENAI_API_KEY and OPENAI_MODEL in Secrets.")
+    st.caption("ℹ️ Set OPENAI_API_KEY and optionally OPENAI_MODEL (gpt-4 or gpt-3.5-turbo).")
 
 # ---------------- SAFETY WRAPPER ----------------
 from contextlib import contextmanager
@@ -588,8 +587,19 @@ class ProgressiveUI:
             st.info(f"Click to load {component_name}")
             return None
 
-# ---------------- NAV ----------------
-tabs = st.tabs(["📈 Admissions Control", "🧾 Revenue Watch", "🛏️ LOS Planner"])
+# ---------------- MINI TOP-NAV (backup) ----------------
+nav_labels = ["📈 Admissions Control","🧾 Revenue Watch","🛏️ LOS Planner"]
+nav = st.segmented_control("Quick nav", nav_labels, selection_mode="single", key="seg_nav") \
+      if hasattr(st, "segmented_control") else None
+if nav:
+    st.markdown(
+        '<div class="navbar">' +
+        "".join([f'<div class="pill {"active" if lab==nav else ""}">{lab}</div>' for lab in nav_labels]) +
+        "</div>", unsafe_allow_html=True
+    )
+
+# ---------------- TABS ----------------
+tabs = st.tabs(nav_labels)
 
 # ===== 1) Admissions Control =====
 with tabs[0], safe_zone("Admissions Control"):
