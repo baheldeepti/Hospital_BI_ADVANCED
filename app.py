@@ -6,11 +6,17 @@
 import os, json, textwrap, asyncio, gc, logging
 from datetime import datetime, date, timedelta
 from typing import Dict, Optional, List
+import streamlit as st
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
-import streamlit as st
+def state(key, default):
+    # Create-if-missing and return
+    return st.session_state.setdefault(key, default)
+
+# Initialize immediately so any later read is safe
+state("decision_log", [])
 
 # Viz / ML
 import plotly.graph_objects as go
@@ -395,14 +401,28 @@ def style_higher_better(df: pd.DataFrame) -> str:
     return styled.to_html()
 
 # ---------------- SAFE ZONE ----------------
+# ---- near safe_zone definition ----
+try:
+    from streamlit.runtime.scriptrunner import StopException  # Streamlit >= 1.20
+except Exception:  # fallback, shouldn't normally run
+    class StopException(Exception):
+        pass
+
+from contextlib import contextmanager
+
 @contextmanager
 def safe_zone(label: str):
     try:
         yield
+    except StopException:
+        # This is normal Streamlit flow control; let it bubble
+        raise
     except Exception as e:
         logger.error("section_error", section=label, error=str(e))
         st.error(f"{label}: something went wrong.")
         st.exception(e)
+
+
 
 # ---------------- Model Manager (async-ready) ----------------
 class ModelManager:
@@ -624,14 +644,16 @@ def _get_openai_client():
         logger.error("openai_init_failed", error=str(e))
         return None
 
-def _try_completion(client, model, messages, temperature=0.2, max_tokens=450):
-    return st.session_state["cb_ai"].call(
+def _try_completion(client, model, messages, temperature=0.1, max_tokens=4000):
+    cb = st.session_state.setdefault("cb_ai", CircuitBreaker(failure_threshold=3, timeout=90))
+    return cb.call(
         client.chat.completions.create,
         model=model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens
     )
+
 
 def _truncate_json(d: dict, limit: int = 6000) -> str:
     s = json.dumps(d, default=str)
@@ -721,15 +743,16 @@ def action_footer(section: str):
         ["House Supervisor", "Revenue Integrity", "Case Mgmt", "Unit Manager", "Finance Lead"],
         key=f"owner_{section}",
     )
+    #decision = c2.selectbox("Decision", ["Promote", "Hold", "Tune", "Investigate"], key=f"decision_{section}")
     decision = c2.selectbox("Decision", ["Promote", "Hold", "Tune", "Investigate"], key=f"decision_{section}")
     sla_date = c3.date_input("SLA Date", value=date.today(), key=f"sla_date_{section}")
-    # ✅ fixed: closed string + closed call
     sla_time = c4.time_input("SLA Time", value=datetime.now().time(), key=f"sla_time_{section}")
     note = st.text_input("Notes (optional)", key=f"note_{section}")
 
     colA, colB = st.columns([1, 1])
     if colA.button(f"Save to Decision Log ({section})", key=f"save_{section}"):
-        st.session_state["decision_log"].append({
+        log = st.session_state.setdefault("decision_log", [])   # <-- defensive
+        log.append({
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "section": section,
             "owner": owner,
@@ -739,7 +762,8 @@ def action_footer(section: str):
         })
         st.success("Saved to Decision Log.")
 
-    df_log = pd.DataFrame(st.session_state["decision_log"])
+    # Defensive read for download/view
+    df_log = pd.DataFrame(st.session_state.get("decision_log", []))
     st.download_button(
         label="Download Decision Log (CSV)",
         data=df_log.to_csv(index=False).encode("utf-8"),
@@ -747,6 +771,7 @@ def action_footer(section: str):
         mime="text/csv",
         key=f"dl_{section}",
     )
+
 
 # ---------------- TABS (top-level) ----------------
 def run_app():
@@ -1047,7 +1072,7 @@ def run_app():
     
     # --------------- FOOTER: Decision Log quick peek ---------------
     with st.expander("Decision Log (peek)"):
-        df_log = pd.DataFrame(st.session_state["decision_log"])
+        df_log = pd.DataFrame(st.session_state.get("decision_log", []))  # <-- defensive
         if df_log.empty:
             st.info("No decisions logged yet.")
         else:
@@ -1058,7 +1083,7 @@ def run_app():
                 file_name="decision_log.csv",
                 mime="text/csv",
                 key="dl_footer"
-        )
+            )
 # Call it with a guard + global safety net
 if __name__ == "__main__":
     try:
