@@ -101,7 +101,7 @@ RENAME_MAP = {
 def __init__(self):
     pass
 
-@staticmethod
+
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {
         "Billing Amount": "billing_amount",
@@ -186,7 +186,7 @@ def _get_fallback_data() -> pd.DataFrame:
 
 def load_data_chunked(self, url: str, chunk_size: int = 10000) -> pd.DataFrame:
     return load_data_chunked_cached(url, chunk_size)
-Create a standalone cached function
+# Create a standalone cached function
 @st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
 def load_data_chunked_cached(url: str, chunk_size: int = 10000) -> pd.DataFrame:
 try:
