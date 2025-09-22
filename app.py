@@ -99,6 +99,7 @@ RENAME_MAP = {
 "Age": "age",
 }
 def __init__(self):
+    pass
 
 @staticmethod
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -232,7 +233,7 @@ iqr = q3 - q1
 lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
 out[col] = int(((s < lo) | (s > hi)).sum())
 return out
-Copydef _check_schema(self, df: pd.DataFrame) -> Dict[str, bool]:
+def _check_schema(self, df: pd.DataFrame) -> Dict[str, bool]:
     must = ["admit_date","billing_amount","length_of_stay"]
     return {c: (c in df.columns) for c in must}
 
@@ -317,7 +318,7 @@ return styled.to_html()
 class ModelManager:
 def init(self):
 self.executor = ThreadPoolExecutor(max_workers=2)
-Copydef _hash_series(self, ts_df: pd.DataFrame, horizon: int) -> str:
+def _hash_series(self, ts_df: pd.DataFrame, horizon: int) -> str:
     h = hashlib.md5()
     h.update(np.asarray(ts_df["y"]).tobytes())
     h.update(str(ts_df["ds"].min()).encode())
@@ -390,7 +391,7 @@ def los_prep(data: pd.DataFrame):
 if "length_of_stay" not in data: return None
 d = data.dropna(subset=["length_of_stay"]).copy()
 d["los_bucket"] = d["length_of_stay"].apply(los_bucket)
-Copy# Numeric columns
+# Numeric columns
 num_cols = [c for c in ["age","billing_amount","length_of_stay","dow","month","is_emergency"] if c in d.columns]
 for c in num_cols:
     d[c] = pd.to_numeric(d[c], errors="coerce").fillna(d[c].median())
@@ -410,7 +411,7 @@ self.failure_threshold = failure_threshold
 self.timeout = timeout
 self.failure_count = 0
 self.last_failure_time: Optional[datetime] = None
-Copydef _is_open(self) -> bool:
+def _is_open(self) -> bool:
     if self.failure_count < self.failure_threshold:
         return False
     if self.last_failure_time is None:
@@ -456,7 +457,7 @@ use_ai = AI_TOGGLE and (client is not None)
 col1, col2 = st.columns([1, 2])
 use_ai = col1.checkbox(f"Use AI for {section_title}", value=use_ai, key=f"ai_use{section_title}")
 analyst = col2.toggle("Analyst mode (more detail)", value=False, key=f"ai_mode_{section_title}")
-Copyif use_ai and client:
+if use_ai and client:
     prompt = textwrap.dedent(f"""
     You are a product-analytics writer for a hospital ops platform.
     Audience: hospital leaders. Tone: crisp, actionable, non-technical.
@@ -514,7 +515,7 @@ decision = c2.selectbox("Decision", ["Promote","Hold","Tune","Investigate"], key
 sla_date = c3.date_input("SLA Date", value=date.today(), key=f"sla_date_{section}")
 sla_time = c4.time_input("SLA Time", value=datetime.now().time(), key=f"sla_time_{section}")
 note = st.text_input("Notes (optional)", key=f"note_{section}")
-CopycolA, colB = st.columns([1,1])
+colA, colB = st.columns([1,1])
 if colA.button(f"Save to Decision Log ({section})", key=f"save_{section}"):
     st.session_state["decision_log"].append({
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -556,7 +557,7 @@ key="adm_val",
 agg = c3.selectbox("Aggregation", ["Daily","Weekly"], index=0, key="adm_agg")
 horizon = c4.slider("Forecast horizon (days)", 7, 90, 30, key="adm_hz")
 freq = "D" if agg=="Daily" else "W"
-Copyfdx = fdf.copy()
+fdx = fdf.copy()
 if cohort_dim!="All" and cohort_dim in fdx and cohort_val and cohort_val!="(all)":
     fdx = fdx[fdx[cohort_dim]==cohort_val]
 
@@ -642,7 +643,7 @@ agg = c1.selectbox("Aggregation", ["Daily","Weekly"], index=0, key="bill_agg")
 sensitivity = c2.slider("Sensitivity (higher = fewer alerts)", 1.5, 5.0, 3.0, 0.1, key="bill_sens")
 baseline_weeks = c3.slider("Baseline window (weeks)", 2, 12, 4, 1, key="bill_base")
 freq = "D" if agg=="Daily" else "W"
-Copyts_bill = build_timeseries(fdf, metric="billing_amount", freq=freq)
+ts_bill = build_timeseries(fdf, metric="billing_amount", freq=freq)
 if ts_bill.empty:
     st.info("No billing series for the current filters.")
     an = None
@@ -720,7 +721,7 @@ except ValueError:
 X_train, X_test, y_train, y_test = train_test_split(
 X, y, test_size=0.25, random_state=42
 )
-Copy    pre = ColumnTransformer(
+    pre = ColumnTransformer(
         transformers=[
             ("num", StandardScaler(), [c for c in num_cols if c in X.columns]),
             ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), [c for c in cat_cols if c in X.columns]),
