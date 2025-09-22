@@ -650,17 +650,38 @@ def ai_write(section_title: str, payload: dict):
     st.json(payload)
     st.caption("ℹ️ Set OPENAI_API_KEY and optionally OPENAI_MODEL to enable narratives.")
 
-# ---------------- ACTION FOOTER + DECISION LOG ----------------
-if "decision_log" not in st.session_state:
-    st.session_state["decision_log"] = []
-
 def action_footer(section: str):
     st.markdown("#### Action footer")
-    c1, c2, c3, c4 = st.columns([1.2,1,1,1])
-    owner = c1.selectbox("Owner",
-        ["House Supervisor","Revenue Integrity","Case Mgmt","Unit Manager","Finance Lead"],
-        key=f"owner_{section}"
+    c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
+
+    owner = c1.selectbox(
+        "Owner",
+        ["House Supervisor", "Revenue Integrity", "Case Mgmt", "Unit Manager", "Finance Lead"],
+        key=f"owner_{section}",
     )
-    decision = c2.selectbox("Decision", ["Promote","Hold","Tune","Investigate"], key=f"decision_{section}")
+    decision = c2.selectbox("Decision", ["Promote", "Hold", "Tune", "Investigate"], key=f"decision_{section}")
     sla_date = c3.date_input("SLA Date", value=date.today(), key=f"sla_date_{section}")
-    sla_time = c4.time_input("
+    # ✅ fixed: closed string + closed call
+    sla_time = c4.time_input("SLA Time", value=datetime.now().time(), key=f"sla_time_{section}")
+    note = st.text_input("Notes (optional)", key=f"note_{section}")
+
+    colA, colB = st.columns([1, 1])
+    if colA.button(f"Save to Decision Log ({section})", key=f"save_{section}"):
+        st.session_state["decision_log"].append({
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "section": section,
+            "owner": owner,
+            "decision": decision,
+            "sla": f"{sla_date} {sla_time}",
+            "note": note,
+        })
+        st.success("Saved to Decision Log.")
+
+    df_log = pd.DataFrame(st.session_state["decision_log"])
+    st.download_button(
+        label="Download Decision Log (CSV)",
+        data=df_log.to_csv(index=False).encode("utf-8"),
+        file_name="decision_log.csv",
+        mime="text/csv",
+        key=f"dl_{section}",
+    )
