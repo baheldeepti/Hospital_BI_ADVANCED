@@ -6,22 +6,45 @@
 #
 # Calibrated for Streamlit Cloud; Prophet/XGBoost are optional.
 
+# ---- Temporary bootstrap to ensure Plotly is importable ----
+import sys, subprocess, pkgutil
+import streamlit as st
+
+def ensure_pkg(pkg: str, spec: str | None = None):
+    """
+    If 'pkg' is not importable, optionally try to install 'spec' via pip at runtime.
+    This is a temporary escape hatch. Proper fix: make Cloud use Python 3.11 and
+    your root requirements.txt so Plotly is installed at build time.
+    """
+    if pkgutil.find_loader(pkg) is None:
+        st.warning(
+            "Required package not found. Attempting a one-time inline install. "
+            "If this persists, fix Streamlit Cloud settings: set Python=3.11 and "
+            "point 'Python packages file path' to your repo's requirements.txt."
+        )
+        st.code(f"Python: {sys.version}\nsys.path: {sys.path}", language="bash")
+        if spec:
+            try:
+                with st.spinner(f"Installing {spec} ..."):
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", spec])
+            except Exception as e:
+                st.error(f"Failed to install {spec}: {e}")
+                st.stop()
+        else:
+            st.error(f"Package '{pkg}' is missing and no spec provided to install.")
+            st.stop()
+
+# Try to import Plotly, or install it then import
+ensure_pkg("plotly", "plotly==5.22.0")
+import plotly.graph_objects as go
+import plotly.express as px
+
+# ---- Standard imports ----
 import os, json, textwrap
 from datetime import datetime, date
 from typing import Dict, List
 import numpy as np
 import pandas as pd
-import streamlit as st
-import pkgutil, sys
-# Optional: temporary visibility in app.py (top of file, right before Plotly import)
-import pkgutil, sys, streamlit as st
-if pkgutil.find_loader("plotly") is None:
-    st.error(f"Plotly not installed. sys.path={sys.path}")
-    st.stop()
-
-import plotly.graph_objects as go
-import plotly.express as px
-
 
 # Optional (auto-detected). NOT required; app degrades gracefully.
 try:
@@ -134,11 +157,10 @@ with st.expander("Data source (optional override)"):
     if up is not None:
         try:
             df = pd.read_csv(up)
-            n_rows = len(df)                     # <- compute count
-            st.success(f"Loaded {n_rows:,} rows from upload.")  # <- no brackets mix-up
+            n_rows = len(df)
+            st.success(f"Loaded {n_rows:,} rows from upload.")
         except Exception as e:
             st.error(f"Failed to read uploaded CSV: {e}")
-
 
 # ---------------- SHARED FILTERS ----------------
 def render_filters(data: pd.DataFrame) -> pd.DataFrame:
@@ -458,7 +480,6 @@ def action_footer(section: str):
             "sla": f"{sla_date} {sla_time}", "note": note
         })
         st.success("Saved to Decision Log.")
-    # Always show a download button so execs can export any time
     df_log = pd.DataFrame(st.session_state["decision_log"])
     st.download_button(
         label="Download Decision Log (CSV)",
@@ -473,7 +494,6 @@ tabs = st.tabs(["📈 Admissions Control", "🧾 Revenue Watch", "🛏️ LOS Pl
 # ===== 1) Admissions Control =====
 with tabs[0]:
     st.subheader("📈 Admissions Control — Forecast → Staffing Targets")
-    # Cohort Explorer
     c1, c2, c3, c4 = st.columns(4)
     cohort_dim = c1.selectbox("Cohort dimension", ["All","hospital","insurer","condition"])
     cohort_val = c2.selectbox(
@@ -484,7 +504,6 @@ with tabs[0]:
     horizon = c4.slider("Forecast horizon (days)", 7, 90, 30)
     freq = "D" if agg=="Daily" else "W"
 
-    # Filter to chosen cohort
     fdx = fdf.copy()
     if cohort_dim!="All" and cohort_dim in fdx and cohort_val and cohort_val!="(all)":
         fdx = fdx[fdx[cohort_dim]==cohort_val]
@@ -493,7 +512,6 @@ with tabs[0]:
     if ts.empty:
         st.info("No admissions series for the current cohort/filters.")
     else:
-        # Seasonality heatmap (weekly view)
         with st.expander("Seasonality calendar (avg admissions by week-of-year × weekday)"):
             s = fdx.set_index("admit_date").assign(_one=1)["_one"].resample("D").sum().fillna(0.0)
             cal = pd.DataFrame({"dow": s.index.weekday, "woy": s.index.isocalendar().week.values, "val": s.values})
@@ -503,16 +521,13 @@ with tabs[0]:
             fig.update_layout(height=360, margin=dict(l=10,r=10,b=10,t=30))
             st.plotly_chart(fig, use_container_width=True)
 
-        # Scenario sliders
         sc1, sc2 = st.columns(2)
         flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5)
         weather_pct = sc2.slider("Weather impact (±%)", -20, 20, 0, 5)
 
-        # Model selection
         candidates = ["Holt-Winters","ARIMA (SARIMAX)"] + (["Prophet"] if _HAS_PROPHET else [])
         chosen = st.multiselect("Models to compare", candidates, default=candidates)
 
-        # Forecast + scenario adjustment
         fc = run_forecasts(ts, horizon=horizon, models=chosen)
         adj_factor = (100 + flu_pct + weather_pct) / 100.0
         fc_adj = {k: v.assign(yhat=v["yhat"] * adj_factor) for k,v in fc.items()}
@@ -523,7 +538,6 @@ with tabs[0]:
             f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'} (with scenario)"
         )
 
-        # Backtest comparison
         metrics = compare_backtests(ts, horizon=horizon, models=chosen)
         if metrics:
             tbl = pd.DataFrame(metrics).T[["MAPE%","MAE","RMSE"]].sort_values("MAPE%")
@@ -534,12 +548,11 @@ with tabs[0]:
             tbl = None
             st.info("Backtests unavailable (insufficient history).")
 
-        # Staffing target heuristic (illustrative)
         st.markdown("#### Staffing targets (illustrative heuristic)")
         if fc_adj:
             first_model = list(fc_adj.keys())[0]
             daily_fc = fc_adj[first_model]["yhat"].to_numpy()
-            rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)  # illustrative heuristic
+            rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)
             targets = pd.DataFrame({
                 "Date": pd.to_datetime(fc_adj[first_model]["ds"]).dt.date,
                 "Expected Admissions": np.round(daily_fc, 1),
@@ -549,7 +562,6 @@ with tabs[0]:
         else:
             st.info("No forecast available to compute staffing targets.")
 
-        # AI Explainer (per-section)
         ai_payload = {
             "cohort": {"dimension": cohort_dim, "value": cohort_val},
             "aggregation": agg,
@@ -560,8 +572,6 @@ with tabs[0]:
         }
         st.markdown("---")
         ai_write("Admissions Control", ai_payload)
-
-        # Action footer
         action_footer("Admissions Control")
 
 # ===== 2) Revenue Watch =====
@@ -581,7 +591,6 @@ with tabs[1]:
         an = detect_anomalies(ts_bill, sensitivity)
         plot_anoms(an, "Billing Amount with Anomalies")
 
-        # Root-cause drilldowns
         st.markdown("#### Root-cause explorer")
         dims = [d for d in ["insurer","hospital","condition","doctor"] if d in fdf.columns]
         if not dims:
@@ -590,7 +599,6 @@ with tabs[1]:
             drill = st.selectbox("Group anomalies by", dims, index=0)
 
             if isinstance(an, pd.DataFrame) and not an.empty:
-                # Build anomaly-day flags using .dt.date (fix for AttributeError)
                 fdf_agg = fdf.set_index("admit_date")
                 an_series = pd.to_datetime(an.loc[an["anomaly"], "ds"])
                 an_days = set(an_series.dt.date.tolist())
@@ -606,7 +614,6 @@ with tabs[1]:
             else:
                 st.info("No anomalies available for drilldown in the current window.")
 
-        # Recent anomaly facts (guarded)
         if isinstance(an, pd.DataFrame) and not an.empty:
             recent = an.tail(30)
             flagged = recent[recent["anomaly"]]
@@ -656,7 +663,6 @@ with tabs[2]:
                 X, y, test_size=0.25, random_state=42
             )
 
-        # Proper preprocessing: scale nums, ONE-HOT encode cats (fix for LOS tab showing nothing)
         pre = ColumnTransformer(
             transformers=[
                 ("num", StandardScaler(), [c for c in num_cols if c in X.columns]),
@@ -724,7 +730,6 @@ with tabs[2]:
         fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Equity slices (group performance by insurer or age_group)
         st.markdown("#### Equity slices")
         slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
         slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if "insurer" in slice_dim_options else 0) if slice_dim_options else None
@@ -740,7 +745,6 @@ with tabs[2]:
                 grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
             st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), use_container_width=True)
 
-        # Per-section AI
         ai_payload = {
             "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
             "metrics_table": perf.to_dict(),
