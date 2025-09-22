@@ -224,29 +224,31 @@ with st.expander("Data source (optional override)"):
             st.error(f"Failed to read uploaded CSV: {e}")
 # Data Quality Monitor 
 class DataQualityMonitor:
-def _detect_outliers(self, df: pd.DataFrame) -> Dict[str, int]:
-out = {}
-for col in ["billing_amount","length_of_stay","age"]:
-if col in df:
-s = pd.to_numeric(df[col], errors="coerce")
-q1, q3 = np.nanpercentile(s, [25, 75])
-iqr = q3 - q1
-lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-out[col] = int(((s < lo) | (s > hi)).sum())
-return out
-def _check_schema(self, df: pd.DataFrame) -> Dict[str, bool]:
-    must = ["admit_date","billing_amount","length_of_stay"]
-    return {c: (c in df.columns) for c in must}
+class DataQualityMonitor:
+    def _detect_outliers(self, df: pd.DataFrame) -> Dict[str, int]:
+        out = {}
+        for col in ["billing_amount","length_of_stay","age"]:
+            if col in df:
+                s = pd.to_numeric(df[col], errors="coerce")
+                q1, q3 = np.nanpercentile(s, [25, 75])
+                iqr = q3 - q1
+                lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+                out[col] = int(((s < lo) | (s > hi)).sum())
+        return out
 
-def generate_quality_report(self, df: pd.DataFrame) -> dict:
-    completeness = (1 - df.isnull().sum() / max(len(df), 1)).to_dict()
-    return {
-        "rows": int(len(df)),
-        "duplicates": int(df.duplicated().sum()),
-        "completeness": {k: float(v) for k,v in completeness.items() if isinstance(v,(int,float,np.floating))},
-        "outliers": self._detect_outliers(df),
-        "schema_compliance": self._check_schema(df),
-    }
+    def _check_schema(self, df: pd.DataFrame) -> Dict[str, bool]:
+        must = ["admit_date","billing_amount","length_of_stay"]
+        return {c: (c in df.columns) for c in must}
+
+    def generate_quality_report(self, df: pd.DataFrame) -> dict:
+        completeness = (1 - df.isnull().sum() / max(len(df), 1)).to_dict()
+        return {
+            "rows": int(len(df)),
+            "duplicates": int(df.duplicated().sum()),
+            "completeness": {k: float(v) for k,v in completeness.items() if isinstance(v,(int,float,np.floating))},
+            "outliers": self._detect_outliers(df),
+            "schema_compliance": self._check_schema(df),
+        }
 dq = DataQualityMonitor()
 with st.expander("Data Quality Report"):
 st.json(dq.generate_quality_report(df))
