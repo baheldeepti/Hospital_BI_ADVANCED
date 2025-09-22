@@ -12,8 +12,16 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 import streamlit as st
+import pkgutil, sys
+# Optional: temporary visibility in app.py (top of file, right before Plotly import)
+import pkgutil, sys, streamlit as st
+if pkgutil.find_loader("plotly") is None:
+    st.error(f"Plotly not installed. sys.path={sys.path}")
+    st.stop()
+
 import plotly.graph_objects as go
 import plotly.express as px
+
 
 # Optional (auto-detected). NOT required; app degrades gracefully.
 try:
