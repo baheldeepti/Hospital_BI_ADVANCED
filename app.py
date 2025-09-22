@@ -429,9 +429,11 @@ def call(self, func, *args, **kwargs):
         raise e
 if "cb_ai" not in st.session_state:
 st.session_state["cb_ai"] = CircuitBreaker(failure_threshold=3, timeout=90)
-#AI_MODEL -- (st.secrets.get("OPENAI_MODEL")
-or os.environ.get("OPENAI_MODEL")
-or "gpt-4o-mini").strip()
+AI_MODEL = (
+    st.secrets.get("OPENAI_MODEL")
+    or os.environ.get("OPENAI_MODEL") 
+    or "gpt-4o-mini"
+).strip()
 def _get_openai_client():
 key = (
 st.secrets.get("OPENAI_API_KEY")
