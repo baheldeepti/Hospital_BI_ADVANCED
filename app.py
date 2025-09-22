@@ -230,7 +230,7 @@ if col in df:
 s = pd.to_numeric(df[col], errors="coerce")
 q1, q3 = np.nanpercentile(s, [25, 75])
 iqr = q3 - q1
-lo, hi = q1 - 1.5iqr, q3 + 1.5iqr
+lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
 out[col] = int(((s < lo) | (s > hi)).sum())
 return out
 Copydef _check_schema(self, df: pd.DataFrame) -> Dict[str, bool]:
