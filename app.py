@@ -70,22 +70,13 @@ st.markdown("""
 h1,h2,h3{font-weight:700;color:var(--ink)}
 a {color:var(--teal)}
 .stButton>button{background:var(--pri);color:#fff;border-radius:10px}
-.small{color:var(--sub);font-size:0.92rem}
+.small{color:#6B7280;font-size:0.92rem}
 hr{border-top:1px solid #eee}
 .stTabs [data-baseweb="tab-list"], .stTabs div[role="tablist"]{
   position: sticky; top: 0; z-index: 5; background: white;
   border-bottom: 1px solid #eee; padding-top:.25rem; margin-top:.25rem;
 }
 .stTabs [data-baseweb="tab"], .stTabs div[role="tab"]{font-weight:600}
-.kpi{
-  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:6px 0 8px;
-}
-.kpi .card{
-  border:1px solid #e5e7eb; border-radius:14px; padding:12px 14px; background:#fff;
-  box-shadow:0 1px 2px rgba(0,0,0,.04);
-}
-.kpi .h{color:#6b7280;font-size:.85rem}
-.kpi .v{font-size:1.3rem; font-weight:700; color:#111827}
 .exec-box{
   border-left:6px solid var(--pri); background:#f9fafb; padding:12px 14px; border-radius:8px; margin:.25rem 0 .75rem;
 }
@@ -193,7 +184,6 @@ class HospitalDataManager:
         return chunk
 
     def _get_fallback_data(self) -> pd.DataFrame:
-        # Deterministic-ish fallback for demo
         rng = np.random.default_rng(42)
         dates = pd.date_range(end=pd.Timestamp.today(), periods=120, freq="D")
         df = pd.DataFrame({
@@ -336,10 +326,7 @@ def style_lower_better(df: pd.DataFrame) -> str:
         return f"background-color: rgba({red},{green},{blue},0.25)"
     styled = df.style.format({"MAPE%":"{:.2f}","MAE":"{:.2f}","RMSE":"{:.2f}"})
     for col in df.columns:
-        styled = styled.apply(
-            lambda s: [bg(val, ranks.loc[s.name, col], col) for val in s],
-            axis=1
-        )
+        styled = styled.apply(lambda s: [bg(val, ranks.loc[s.name, col], col) for val in s], axis=1)
     return styled.to_html()
 
 def style_higher_better(df: pd.DataFrame) -> str:
@@ -380,14 +367,13 @@ class ModelManager:
         return np.asarray(m.forecast(horizon))
 
     def _arima_forecast(self, s: pd.Series, horizon: int) -> np.ndarray:
-        # Simple SARIMAX(1,1,1) with weekly seasonality as a robust default
         try:
-            model = SARIMAX(s, order=(1,1,1), seasonal_order=(1,0,1,7), enforce_stationarity=False, enforce_invertibility=False)
+            model = SARIMAX(s, order=(1,1,1), seasonal_order=(1,0,1,7),
+                            enforce_stationarity=False, enforce_invertibility=False)
             res = model.fit(disp=False)
             fc = res.forecast(steps=horizon)
             return np.asarray(fc)
         except Exception:
-            # Fallback to naive drift
             diff = s.diff().dropna()
             drift = diff.mean() if len(diff) else 0.0
             last = s.iloc[-1]
@@ -406,63 +392,44 @@ class ModelManager:
     def forecast_all(self, ts: pd.DataFrame, horizon: int) -> Dict[str, pd.DataFrame]:
         s = ts.set_index("ds")["y"].asfreq("D").ffill()
         idx = pd.date_range(s.index.max() + pd.Timedelta(days=1), periods=horizon, freq="D")
-
-        out = {}
-        # Holt-Winters
-        yhat_hw = self._holt_forecast(s, horizon)
-        out["Holt-Winters"] = pd.DataFrame({"ds": idx, "yhat": yhat_hw})
-        # ARIMA/SARIMAX
-        yhat_arima = self._arima_forecast(s, horizon)
-        out["ARIMA"] = pd.DataFrame({"ds": idx, "yhat": yhat_arima})
-        # Prophet (optional)
+        out: Dict[str, pd.DataFrame] = {}
+        out["Holt-Winters"] = pd.DataFrame({"ds": idx, "yhat": self._holt_forecast(s, horizon)})
+        out["ARIMA"] = pd.DataFrame({"ds": idx, "yhat": self._arima_forecast(s, horizon)})
         if _HAS_PROPHET:
             try:
-                yhat_prophet = self._prophet_forecast(ts, horizon)
-                out["Prophet"] = pd.DataFrame({"ds": idx, "yhat": yhat_prophet})
+                out["Prophet"] = pd.DataFrame({"ds": idx, "yhat": self._prophet_forecast(ts, horizon)})
             except Exception as e:
                 logger.warning("prophet_failed", error=str(e))
         return out
 
     def backtest(self, ts: pd.Series, horizon: int, windows: int = 3) -> Dict[str, Dict[str,float]]:
-        """Rolling-origin backtest for Holt-Winters, ARIMA, Prophet (if available)."""
         metrics: Dict[str, List[float]] = {"Holt-Winters":[],"ARIMA":[]}
         if _HAS_PROPHET: metrics["Prophet"] = []
-        n = len(ts)
-        step = horizon
-        # ensure enough history
+        n = len(ts); step = horizon
         needed = (windows+1)*horizon + 7
         if n < needed:
             windows = max(1, (n - 14) // max(1, horizon))
 
         def eval_pair(y_true, y_pred):
-            return ts_metrics(y_true, y_pred)["MAPE%"]  # we'll compute others later
+            return ts_metrics(y_true, y_pred)["MAPE%"]
 
         for w in range(windows, 0, -1):
             split = n - w*step
             train = ts.iloc[:split].asfreq("D").ffill()
             test = ts.iloc[split:split+step]
-            # HW
-            try:
-                hw = self._holt_forecast(train, step)
-                metrics["Holt-Winters"].append(eval_pair(test.to_numpy(), hw))
-            except Exception:
-                metrics["Holt-Winters"].append(np.nan)
-            # ARIMA
-            try:
-                ar = self._arima_forecast(train, step)
-                metrics["ARIMA"].append(eval_pair(test.to_numpy(), ar))
-            except Exception:
-                metrics["ARIMA"].append(np.nan)
-            # Prophet
-            if _HAS_PROPHET:
+            for name in ["Holt-Winters","ARIMA"] + (["Prophet"] if _HAS_PROPHET else []):
                 try:
-                    dfp = pd.DataFrame({"ds": train.index, "y": train.values})
-                    pr_fc = self._prophet_forecast(dfp, step)
-                    metrics["Prophet"].append(eval_pair(test.to_numpy(), pr_fc))
+                    if name == "Holt-Winters":
+                        yhat = self._holt_forecast(train, step)
+                    elif name == "ARIMA":
+                        yhat = self._arima_forecast(train, step)
+                    else:
+                        dfp = pd.DataFrame({"ds": train.index, "y": train.values})
+                        yhat = self._prophet_forecast(dfp, step)
+                    metrics[name].append(eval_pair(test.to_numpy(), np.asarray(yhat)))
                 except Exception:
-                    metrics["Prophet"].append(np.nan)
+                    metrics[name].append(np.nan)
 
-        # Summaries (MAPE/MAE/RMSE using concatenated preds for fairness)
         def concat_eval(model_name):
             preds, trues = [], []
             for w in range(windows, 0, -1):
@@ -520,7 +487,7 @@ def plot_anoms(an_df: pd.DataFrame, title: str):
         fig.add_trace(go.Scatter(x=flag["ds"], y=flag["y"], mode="markers", name="Anomaly",
                                  marker=dict(size=10, symbol="x")))
     fig.update_layout(title=title, height=420, margin=dict(l=10,r=10,b=10,t=50))
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, width="stretch")
 
 # ---------------- LOS HELPERS ----------------
 def los_bucket(days: float) -> str:
@@ -628,7 +595,6 @@ def ai_write(section_title: str, payload: dict):
     use_ai = col1.checkbox(f"Use AI for {section_title}", value=use_ai_default, key=f"ai_use_{section_title}")
     analyst = col2.toggle("Analyst mode (more detail)", value=False, key=f"ai_mode_{section_title}")
 
-    # Polished prompts
     voice = "Executive Summary" if not analyst else "Analyst Report"
     sys_msg = (
         "You are a healthcare analytics writer. Be clear, factual, and business-focused. "
@@ -651,10 +617,7 @@ def ai_write(section_title: str, payload: dict):
     """).strip()
 
     if use_ai and client:
-        messages = [
-            {"role": "system", "content": sys_msg},
-            {"role": "user", "content": content},
-        ]
+        messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": content}]
         tried = []
         for mdl in _MODEL_PREFS:
             try:
@@ -668,7 +631,6 @@ def ai_write(section_title: str, payload: dict):
         with st.expander("AI unavailable (showing deterministic summary)"):
             st.caption("Tried: " + " | ".join(tried))
 
-    # Deterministic fallback
     st.markdown(f"**Deterministic summary — {section_title}**")
     st.markdown("""
 <div class="exec-box">
@@ -720,7 +682,7 @@ if nav:
 # ---------------- TABS (top-level, always render) ----------------
 tabs = st.tabs(nav_labels)
 
-# ===== 1) Admissions Control =====
+# ===== 1) Admissions Control (safe_zone) =====
 with tabs[0], safe_zone("Admissions Control"):
     st.subheader("📈 Admissions Control — Forecast → Staffing Targets")
     c1, c2, c3, c4 = st.columns(4)
@@ -742,7 +704,6 @@ with tabs[0], safe_zone("Admissions Control"):
     if ts.empty:
         st.info("No admissions series for the current cohort/filters.")
     else:
-        # Calendar view (lazy)
         with st.expander("Seasonality calendar (avg admissions by week-of-year × weekday)"):
             s = fdx.set_index("admit_date").assign(_one=1)["_one"].resample("D").sum().fillna(0.0)
             cal = pd.DataFrame({"dow": s.index.weekday, "woy": s.index.isocalendar().week.values, "val": s.values})
@@ -750,16 +711,15 @@ with tabs[0], safe_zone("Admissions Control"):
             heat_pivot = heat.pivot(index="woy", columns="dow", values="val").fillna(0)
             fig = px.imshow(heat_pivot, aspect="auto", labels=dict(x="Weekday (0=Mon)", y="Week of Year", color="Avg admits"))
             fig.update_layout(height=360, margin=dict(l=10,r=10,b=10,t=30))
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, width="stretch")
 
         sc1, sc2 = st.columns(2)
         flu_pct = sc1.slider("Flu surge scenario (±%)", -30, 50, 0, 5, key="adm_flu")
         weather_pct = sc2.slider("Weather impact (±%)", -20, 20, 0, 5, key="adm_wthr")
 
-        # ---- Forecast (multiple models) ----
         fc_dict = model_mgr.forecast_all(ts, horizon=horizon)
         adj_factor = (100 + flu_pct + weather_pct) / 100.0
-        # Plot
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=ts["ds"], y=ts["y"], name="History", mode="lines"))
         for name, fc in fc_dict.items():
@@ -768,9 +728,9 @@ with tabs[0], safe_zone("Admissions Control"):
             title=f"Admissions Forecast — Cohort: {cohort_dim} = {cohort_val if cohort_dim!='All' else 'All'}",
             height=420, margin=dict(l=10,r=10,b=10,t=50)
         )
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width="stretch")
 
-        # ---- Backtests & Model Comparison ----
+        # Backtests & model comparison (shaded)
         try:
             s = ts.set_index("ds")["y"].asfreq("D").ffill()
             H = min(14, horizon)
@@ -779,7 +739,6 @@ with tabs[0], safe_zone("Admissions Control"):
             st.markdown("#### 🧪 Model Comparison (rolling backtests)")
             st.markdown(style_lower_better(comp), unsafe_allow_html=True)
             st.caption("Lower is better. Shading ranks performance within each metric (greener = better).")
-            # Select best model by MAPE first, then RMSE
             comp_rank = comp.rank(ascending=True, method="min")
             best = comp_rank.sum(axis=1).sort_values().index[0]
         except Exception as e:
@@ -790,7 +749,6 @@ with tabs[0], safe_zone("Admissions Control"):
         best_fc = fc_dict.get(best, next(iter(fc_dict.values())))
         daily_fc = (best_fc["yhat"] * adj_factor).to_numpy()
 
-        # Staffing heuristic
         st.markdown("#### Staffing targets (illustrative heuristic)")
         rn_per_shift = np.ceil(daily_fc / 5.0).astype(int)
         targets = pd.DataFrame({
@@ -798,9 +756,8 @@ with tabs[0], safe_zone("Admissions Control"):
             "Expected Admissions": np.round(daily_fc, 1),
             "RN/Day": rn_per_shift, "RN/Evening": rn_per_shift, "RN/Night": rn_per_shift
         })
-        st.dataframe(targets, width='stretch', hide_index=True)
+        st.dataframe(targets, width="stretch", hide_index=True)
 
-        # AI narrative
         ai_payload = {
             "cohort": {"dimension": cohort_dim, "value": cohort_val},
             "aggregation": agg, "horizon_days": horizon,
@@ -815,7 +772,7 @@ with tabs[0], safe_zone("Admissions Control"):
         ai_write("Admissions Control", ai_payload)
         action_footer("Admissions Control")
 
-# ===== 2) Revenue Watch =====
+# ===== 2) Revenue Watch (safe_zone) =====
 with tabs[1], safe_zone("Revenue Watch"):
     st.subheader("🧾 Revenue Watch — Anomalies → Cash Protection")
     c1, c2, c3 = st.columns(3)
@@ -850,7 +807,7 @@ with tabs[1], safe_zone("Revenue Watch"):
                     encounters=("billing_amount","count"),
                     anomaly_days=("is_anom_day","sum")
                 ).reset_index().sort_values("anomaly_days", ascending=False)
-                st.dataframe(grp, width='stretch')
+                st.dataframe(grp, width="stretch")
             else:
                 st.info("No anomalies available for drilldown in the current window.")
 
@@ -863,7 +820,7 @@ with tabs[1], safe_zone("Revenue Watch"):
                 else:
                     st.dataframe(
                         flagged[["ds","y","rzs","score"]].rename(columns={"ds":"When","y":"Value"}),
-                        width='stretch'
+                        width="stretch"
                     )
         else:
             st.info("No recent anomalies to display.")
@@ -885,7 +842,7 @@ with tabs[1], safe_zone("Revenue Watch"):
     ai_write("Revenue Watch", ai_payload)
     action_footer("Revenue Watch")
 
-# ===== 3) LOS Planner =====
+# ===== 3) LOS Planner (safe_zone) =====
 with tabs[2], safe_zone("LOS Planner"):
     st.subheader("🛏️ LOS Planner — Risk Buckets → Discharge Orchestration")
     prep = los_prep(fdf)
@@ -968,7 +925,7 @@ with tabs[2], safe_zone("LOS Planner"):
                     fig.add_trace(go.Scatter(x=fprs[cls], y=tprs[cls], mode="lines", name=f"{top_model} — {cls}"))
             fig.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines", name="Chance", line=dict(dash="dash")))
             fig.update_layout(height=420, xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, width="stretch")
         with st.expander("ROC Curves (one-vs-rest)"):
             _render_roc()
 
@@ -986,7 +943,7 @@ with tabs[2], safe_zone("LOS Planner"):
                 mask = (slice_vals==sv)
                 acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
                 grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
-            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width='stretch')
+            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width="stretch")
 
         ai_payload = {
             "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
@@ -1003,7 +960,7 @@ with st.expander("Decision Log (peek)"):
     if df_log.empty:
         st.info("No decisions logged yet.")
     else:
-        st.dataframe(df_log, width='stretch')
+        st.dataframe(df_log, width="stretch")
         st.download_button(
             label="Download Decision Log (CSV)",
             data=df_log.to_csv(index=False).encode("utf-8"),
