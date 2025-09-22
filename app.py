@@ -295,7 +295,7 @@ def bg(col, row):
 r = ranks.loc[row, col]; rmin, rmax = ranks[col].min(), ranks[col].max()
 if rmax == rmin: return "background-color: rgba(255,255,255,0.6)"
 pct = (r - rmin)/(rmax - rmin + 1e-9)
-red = int(255pct); green = int(255(1-pct)); blue = 200
+red = int(255 * pct); green = int(255 * (1-pct)); blue = 200
 return f"background-color: rgba({red},{green},{blue},0.25)"
 styled = df.style.format({"MAPE%":"{:.2f}","MAE":"{:.2f}","RMSE":"{:.2f}"})
 for col in df.columns:
