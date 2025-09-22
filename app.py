@@ -448,7 +448,7 @@ if "cb_ai" not in st.session_state:
 # Allow-list & fallback to avoid 403 model errors
 _ALLOWED_MODELS = [
     os.environ.get("OPENAI_MODEL", "").strip() or st.secrets.get("OPENAI_MODEL", "") or "",
-     "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"  # Changed "gpt-4.1-mini" to "gpt-4-turbo"
+     "gpt-4", "gpt-3.5-turbo" 
 ]
 AI_MODEL = next((m for m in _ALLOWED_MODELS if m), "gpt-3.5-turbo")
 
@@ -506,7 +506,7 @@ def ai_write(section_title: str, payload: dict):
         
         # Try models with better error handling
         tried = []
-        available_models = ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"]  # Use known available models
+        available_models = ["gpt-3.5-turbo", "gpt-4"]  # Use known available models
         for mdl in [AI_MODEL] + [m for m in available_models if m and m != AI_MODEL]:
             try:
                 rsp = _try_completion(client, mdl, prompt)
