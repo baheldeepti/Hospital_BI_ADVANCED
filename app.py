@@ -604,56 +604,74 @@ def _truncate_json(d: dict, limit: int = 6000) -> str:
 
 def ai_write(section_title: str, payload: dict):
     """Polished executive/analyst narratives with safe fallbacks, never crash."""
-    client = _get_openai_client()
-    use_ai_default = AI_TOGGLE and (client is not None)
-    col1, col2 = st.columns([1, 2])
-    use_ai = col1.checkbox(f"Use AI for {section_title}", value=use_ai_default, key=f"ai_use_{section_title}")
-    analyst = col2.toggle("Analyst mode (more detail)", value=False, key=f"ai_mode_{section_title}")
+    try:
+        client = _get_openai_client()
+        use_ai_default = bool(AI_TOGGLE and (client is not None))
 
-    voice = "Executive Summary" if not analyst else "Analyst Report"
-    sys_msg = (
-        "You are a healthcare analytics writer. Be clear, factual, and business-focused. "
-        "Avoid buzzwords. Produce tidy markdown."
-    )
-    content = textwrap.dedent(f"""
-    Create a {voice} for **{section_title}** from the JSON below. Two audiences:
+        col1, col2 = st.columns([1, 2])
+        use_ai = col1.checkbox(f"Use AI for {section_title}", value=use_ai_default, key=f"ai_use_{section_title}")
+        analyst = col2.toggle("Analyst mode (more detail)", value=False, key=f"ai_mode_{section_title}")
 
-    1) **Executives** — What, So-What, Now-What. Crisp, 5–7 bullet points max.
-    2) **Operations** — next steps with owners and target due dates.
-    3) **Performance & Use Cases** — a compact markdown table (2–5 rows).
-    4) **Risk/Watchlist** — 2–4 bullets, if relevant.
+        voice = "Executive Summary" if not analyst else "Analyst Report"
+        sys_msg = (
+            "You are a healthcare analytics writer. Be clear, factual, and business-focused. "
+            "Avoid buzzwords. Produce tidy markdown."
+        )
 
-    Style:
-    - Start with a one-paragraph headline takeaway in bold.
-    - Use short sentences and numbers (e.g., “↑12% WoW”).
-    - Keep under 220 words for Executive mode; up to 350 for Analyst mode.
+        # Keep tokens modest; long prompts + big max_tokens are a common failure mode
+        max_out_tokens = 420 if not analyst else 520
 
-    JSON (trimmed): { _truncate_json(payload, 5500) }
-    """).strip()
+        # Trim the JSON more aggressively in analyst mode to avoid over-long prompts
+        json_trim_limit = 4500 if analyst else 5500
 
-    if use_ai and client:
-        messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": content}]
-        tried = []
-        for mdl in _MODEL_PREFS:
-            try:
-                rsp = _try_completion(client, mdl, messages, temperature=0.25, max_tokens=350 if not analyst else 550)
-                st.markdown(rsp.choices[0].message.content)
-                with st.expander("AI diagnostics", expanded=False):
-                    st.caption(f"Model: `{mdl}`")
-                return
-            except Exception as e:
-                tried.append(f"{mdl}: {type(e).__name__}")
-        with st.expander("AI unavailable (showing deterministic summary)"):
-            st.caption("Tried: " + " | ".join(tried))
+        content = textwrap.dedent(f"""
+        Create a {voice} for **{section_title}** from the JSON below. Two audiences:
 
-    st.markdown(f"**Deterministic summary — {section_title}**")
-    st.markdown("""
+        1) **Executives** — What, So-What, Now-What. Crisp, 5–7 bullet points max.
+        2) **Operations** — next steps with owners and target due dates.
+        3) **Performance & Use Cases** — a compact markdown table (2–5 rows).
+        4) **Risk/Watchlist** — 2–4 bullets, if relevant.
+
+        Style:
+        - Start with a one-paragraph headline takeaway in bold.
+        - Use short sentences and numbers (e.g., “↑12% WoW”).
+        - Keep under 220 words for Executive mode; up to 350 for Analyst mode.
+
+        JSON (trimmed): { _truncate_json(payload, json_trim_limit) }
+        """).strip()
+
+        if use_ai and client:
+            messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": content}]
+            tried = []
+            # Only try models we actually listed
+            for mdl in _MODEL_PREFS:
+                try:
+                    rsp = _try_completion(client, mdl, messages, temperature=0.25, max_tokens=max_out_tokens)
+                    st.markdown(rsp.choices[0].message.content)
+                    with st.expander("AI diagnostics", expanded=False):
+                        st.caption(f"Model: `{mdl}` | tokens: ≤{max_out_tokens}")
+                    return
+                except Exception as e:
+                    tried.append(f"{mdl}: {type(e).__name__} — {str(e)[:120]}")
+
+            with st.expander("AI unavailable (showing deterministic summary)"):
+                st.caption("Tried: " + " | ".join(tried))
+
+        # Fallback deterministic summary — never throw
+        st.markdown(f"**Deterministic summary — {section_title}**")
+        st.markdown("""
 <div class="exec-box">
 <b>Headline:</b> Platform generated summary is unavailable. Use the operational details below to brief the team.
 </div>
 """, unsafe_allow_html=True)
-    st.json(payload)
-    st.caption("ℹ️ Set OPENAI_API_KEY and optionally OPENAI_MODEL to enable narratives.")
+        st.json(payload)
+        st.caption("ℹ️ Set OPENAI_API_KEY and optionally OPENAI_MODEL to enable narratives.")
+    except Exception as e:
+        # Last-resort safety net: show the error instead of the white 'Oh no' page
+        st.error("Narrative generation failed.")
+        st.exception(e)
+        logger.exception("ai_write_error", section=section_title)
+
 
 # ---------------- ACTION FOOTER + DECISION LOG ----------------
 if "decision_log" not in st.session_state:
