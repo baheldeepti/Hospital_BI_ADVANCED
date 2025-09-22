@@ -185,25 +185,28 @@ class HospitalDataManager:
         return df
 
     # --- Cache: ignore `self` to avoid UnhashableParamError
+    @staticmethod
     @st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
-    def load_data_chunked(self, url: str, chunk_size: int = 10000) -> pd.DataFrame:
+    def load_data_chunked(url: str, chunk_size: int = 10000) -> pd.DataFrame:
+        # Create a temporary instance for processing
+        temp_mgr = HospitalDataManager()
         try:
             chunks = []
             for chunk in pd.read_csv(url, chunksize=chunk_size):
-                chunk = self._normalize_columns(chunk)
-                chunk = self._coerce_types(chunk)
-                chunk = self._validate_chunk(chunk)
+                chunk = temp_mgr._normalize_columns(chunk)
+                chunk = temp_mgr._coerce_types(chunk)
+                chunk = temp_mgr._validate_chunk(chunk)
                 chunks.append(chunk)
             if not chunks:
-                return self._get_fallback_data()
+                return temp_mgr._get_fallback_data()
             df = pd.concat(chunks, ignore_index=True)
-            df = self._feature_engineer(df)
+            df = temp_mgr._feature_engineer(df)
             logger.info("data_loaded", rows=len(df))
             return df
         except Exception as e:
             logger.error("data_load_failed", error=str(e))
             st.error(f"Data load failed. Using fallback dataset. Details: {e}")
-            return self._get_fallback_data()
+            return temp_mgr._get_fallback_data()
 
 
 
