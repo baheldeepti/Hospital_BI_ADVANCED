@@ -835,6 +835,7 @@ def run_app():
         action_footer("Revenue Watch")
     
     # ===== 3) LOS Planner =====
+    #start
     # ===== 3) LOS Planner =====
     with tabs[2], safe_zone("LOS Planner"):
         st.subheader("🛏️ LOS Planner — Risk Buckets → Discharge Orchestration")
@@ -926,7 +927,6 @@ def run_app():
                 if (y_proba is not None) and (len(np.unique(pd.Series(y_test).dropna())) >= 2):
                     try:
                         y_test_b = label_binarize(y_test, classes=classes)
-                        # Only compute AUC if classifier produced probs for all classes we expect
                         if y_proba.shape[1] == len(classes):
                             auc = roc_auc_score(y_test_b, y_proba, average="weighted", multi_class="ovr")
                             for i, cls in enumerate(classes):
@@ -970,41 +970,44 @@ def run_app():
     
             with st.expander("ROC Curves (one-vs-rest)"):
                 _render_roc()
-
-        # ---- Equity slices (optional)
-        st.markdown("#### Equity slices")
-        slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
-        slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if slice_dim_options else 0, key="los_slice") if slice_dim_options else None
-        if slice_dim:
-            try:
-                top_model = perf["F1"].astype(float).idxmax()
-            except Exception:
-                top_model = next(iter(results.keys()))
-            best_pipe = models[top_model]
-            X_test_idx = X_test.index
-            slice_vals = d_full.loc[X_test_idx, slice_dim].fillna("Unknown")
-            y_pred_best = best_pipe.predict(X_test)
-
-            grp_rows = []
-            for sv in sorted(pd.Series(slice_vals).unique().tolist()):
-                mask = (slice_vals == sv)
+    
+            # ---- Equity slices (optional)  **← NOW inside the else block**
+            st.markdown("#### Equity slices")
+            slice_dim_options = [d for d in ["insurer","age_group"] if d in d_full.columns]
+            slice_dim = st.selectbox("Slice by", slice_dim_options, index=0 if slice_dim_options else 0, key="los_slice") if slice_dim_options else None
+            if slice_dim:
                 try:
-                    acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
+                    top_model = perf["F1"].astype(float).idxmax()
                 except Exception:
-                    # index misalignment guard
-                    acc_g = np.nan
-                grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
+                    top_model = next(iter(results.keys()))
+                best_pipe = models[top_model]
+                X_test_idx = X_test.index
+                slice_vals = d_full.loc[X_test_idx, slice_dim].fillna("Unknown")
+                y_pred_best = best_pipe.predict(X_test)
+    
+                grp_rows = []
+                for sv in sorted(pd.Series(slice_vals).unique().tolist()):
+                    mask = (slice_vals == sv)
+                    try:
+                        acc_g = accuracy_score(y_test[mask], y_pred_best[mask]) if mask.any() else np.nan
+                    except Exception:
+                        acc_g = np.nan
+                    grp_rows.append({"Group": str(sv), "Accuracy": acc_g, "N": int(mask.sum())})
+    
+                st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width="stretch")
+    
+            ai_payload = {
+                "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
+                "metrics_table": perf.to_dict(),
+                "equity_slice": slice_dim
+            }
+            st.markdown("---")
+            ai_write("LOS Planner", ai_payload)
+            action_footer("LOS Planner")
 
-            st.dataframe(pd.DataFrame(grp_rows).sort_values("Accuracy", ascending=False), width="stretch")
 
-        ai_payload = {
-            "buckets": {"Short":"<=5","Medium":"6-15","Long":"16-45","Very Long":">45"},
-            "metrics_table": perf.to_dict(),
-            "equity_slice": slice_dim
-        }
-        st.markdown("---")
-        ai_write("LOS Planner", ai_payload)
-        action_footer("LOS Planner")
+    #end 
+
     
     
     # --------------- FOOTER: Decision Log quick peek ---------------
