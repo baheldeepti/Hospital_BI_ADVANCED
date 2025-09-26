@@ -560,7 +560,7 @@ def plot_anoms(an_df: pd.DataFrame, title: str):
     _safe_plotly_chart(fig)
 
 # ---------------- LOS HELPERS ----------------
-def los_bucket(days: float) -> str:
+def los_bucket(days: float) -> float | str:
     if pd.isna(days): return np.nan
     d = float(days)
     if d <= 5: return "Short"
@@ -586,9 +586,10 @@ def los_prep(data: pd.DataFrame):
     for c in cat_cols:
         d[c] = d[c].astype("string").fillna("Unknown")
 
-    X = d[num_cols + cat_cols].copy()
+    x = d[num_cols + cat_cols].copy()
     y = d["los_bucket"].copy()
-    return X, y, num_cols, cat_cols, d, ohe
+
+    return x, y, num_cols, cat_cols, d, ohe
 
 # ---------------- Circuit Breaker for External APIs ----------------
 class CircuitBreaker:
