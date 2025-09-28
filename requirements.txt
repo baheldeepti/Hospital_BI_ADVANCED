@@ -1,25 +1,21 @@
-# Core app
+# Core UI + data stack
 streamlit==1.49.1
 pandas==2.2.2
 numpy==1.26.4
 plotly==5.22.0
+
+# ML / modeling
 scikit-learn==1.5.2
 statsmodels==0.14.2
+scipy==1.11.4
+joblib>=1.3.0
+threadpoolctl>=3.1.0
 
-# ML extras
-xgboost==2.1.1
-
-# Viz (your code imports seaborn)
-seaborn==0.13.2
+# Visualization (you import seaborn)
 matplotlib>=3.8.0
+seaborn==0.13.2
 
-# System utils
-psutil==6.0.0
-structlog==24.1.0
-
-# OpenAI — you’re using the legacy ChatCompletion API
-openai==0.28.1
-
-# Prophet is optional in your code; include ONLY if you really need it:
+# Optional extras (enable if you plan to use them in-app)
+xgboost==2.1.1
 prophet==1.1.5
-cmdstanpy<1.2
+cmdstanpy<1.2   # required by prophet; keep this pin for smooth installs
