@@ -2,10 +2,9 @@
 # Redesigned for optimal user experience without sidebars
 
 import os
-import json
 import warnings
 from datetime import datetime
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -31,13 +30,13 @@ warnings.filterwarnings("ignore")
 
 # Optional libraries with graceful fallback
 try:
-    from prophet import Prophet
+    from prophet import Prophet  # noqa: F401
     HAS_PROPHET = True
 except Exception:
     HAS_PROPHET = False
 
 try:
-    import xgboost as xgb
+    import xgboost as xgb  # noqa: F401
     HAS_XGBOOST = True
 except Exception:
     HAS_XGBOOST = False
@@ -143,48 +142,37 @@ st.markdown(
 # ---------- Data loading ----------
 @st.cache_data(ttl=3600, show_spinner="Loading hospital data...")
 def load_hospital_data() -> pd.DataFrame:
+    local_path = "/mnt/data/modified_healthcare_dataset.csv"
+    df = None
     try:
-        url = "https://raw.githubusercontent.com/baheldeepti/hospital-streamlit-app/main/modified_healthcare_dataset.csv"
-        df = pd.read_csv(url)
+        if os.path.exists(local_path):
+            df = pd.read_csv(local_path)
+        else:
+            url = "https://raw.githubusercontent.com/baheldeepti/hospital-streamlit-app/main/modified_healthcare_dataset.csv"
+            df = pd.read_csv(url)
     except Exception as e:
-        st.warning(f"Could not load data from URL: {e}. Using synthetic data.")
+        st.warning(f"Could not load data from file/url: {e}. Using synthetic data.")
         np.random.seed(42)
         n_records = 10000
         dates = pd.date_range(start="2023-01-01", end="2024-01-01", periods=n_records)
         df = pd.DataFrame(
             {
                 "Date of Admission": dates,
-                "Discharge Date": dates
-                + pd.to_timedelta(np.random.exponential(5, n_records), unit="D"),
+                "Discharge Date": dates + pd.to_timedelta(np.random.exponential(5, n_records), unit="D"),
                 "Age": np.random.normal(55, 20, n_records).clip(0, 100),
                 "Medical Condition": np.random.choice(
-                    ["Diabetes", "Hypertension", "Heart Disease", "Cancer", "Asthma"],
-                    n_records,
+                    ["Diabetes", "Hypertension", "Heart Disease", "Cancer", "Asthma"], n_records
                 ),
-                "Admission Type": np.random.choice(
-                    ["Emergency", "Elective", "Urgent"], n_records, p=[0.4, 0.4, 0.2]
-                ),
-                "Hospital": np.random.choice(
-                    ["General Hospital", "Children Hospital", "University Hospital"],
-                    n_records,
-                ),
-                "Insurance Provider": np.random.choice(
-                    ["Medicare", "Medicaid", "Blue Cross", "Aetna", "UnitedHealth"],
-                    n_records,
-                ),
+                "Admission Type": np.random.choice(["Emergency", "Elective", "Urgent"], n_records, p=[0.4, 0.4, 0.2]),
+                "Hospital": np.random.choice(["General Hospital", "Children Hospital", "University Hospital"], n_records),
+                "Insurance Provider": np.random.choice(["Medicare", "Medicaid", "Blue Cross", "Aetna", "UnitedHealth"], n_records),
                 "Billing Amount": np.random.lognormal(8, 1, n_records),
-                "Doctor": [
-                    f"Dr. {name}"
-                    for name in np.random.choice(
-                        ["Smith", "Johnson", "Williams", "Brown", "Jones"], n_records
-                    )
-                ],
-                "Test Results": np.random.choice(
-                    ["Normal", "Abnormal", "Inconclusive"], n_records, p=[0.6, 0.3, 0.1]
-                ),
+                "Doctor": [f"Dr. {name}" for name in np.random.choice(["Smith", "Johnson", "Williams", "Brown", "Jones"], n_records)],
+                "Test Results": np.random.choice(["Normal", "Abnormal", "Inconclusive"], n_records, p=[0.6, 0.3, 0.1]),
             }
         )
 
+    # normalize & engineer
     df.columns = df.columns.str.replace(" ", "_").str.lower()
     for col in ["date_of_admission", "discharge_date"]:
         if col in df.columns:
@@ -192,7 +180,6 @@ def load_hospital_data() -> pd.DataFrame:
 
     if {"date_of_admission", "discharge_date"}.issubset(df.columns):
         los = (df["discharge_date"] - df["date_of_admission"]).dt.days
-        # guard: clamp to >= 0 and replace NaN with 0 then shift to at least 1 day if needed
         df["length_of_stay"] = np.clip(los.fillna(0), 0, 365).astype(int).replace(0, 1)
 
     if "date_of_admission" in df.columns:
@@ -206,18 +193,14 @@ def load_hospital_data() -> pd.DataFrame:
     if "age" in df.columns:
         df["age"] = pd.to_numeric(df["age"], errors="coerce").fillna(df["age"].median())
         df["age_group"] = pd.cut(
-            df["age"],
-            bins=[0, 18, 35, 50, 65, 100],
-            labels=["Child", "Young Adult", "Adult", "Senior", "Elderly"],
-            include_lowest=True,
+            df["age"], bins=[0, 18, 35, 50, 65, 100],
+            labels=["Child", "Young Adult", "Adult", "Senior", "Elderly"], include_lowest=True,
         )
 
     if "length_of_stay" in df.columns:
         df["los_category"] = pd.cut(
-            df["length_of_stay"],
-            bins=[0, 3, 7, 14, float("inf")],
-            labels=["Short", "Medium", "Long", "Extended"],
-            include_lowest=True,
+            df["length_of_stay"], bins=[0, 3, 7, 14, float("inf")],
+            labels=["Short", "Medium", "Long", "Extended"], include_lowest=True,
         )
 
     return df.dropna(subset=["date_of_admission"])
@@ -275,168 +258,137 @@ if admission_types:
 if len(filtered_df) != len(df):
     st.info(f"Applied filters: {len(filtered_df):,} of {len(df):,} records selected")
 
-# ---------- Utility: business summary ----------
+# Make frames available to insight generator (default)
+st.session_state["_filtered_df_for_summary"] = filtered_df
+
+# ---------- Data-first Business Insights generator ----------
 def generate_business_summary(section_title: str, data_summary: dict, model_results: Optional[dict] = None) -> str:
     role = st.session_state.get("USER_ROLE", "Executive")
     total_records = int(data_summary.get("total_records", 0))
+    section = section_title.lower()
 
-    def pct(x, d=2):
-        try:
-            return f"{float(x)*100:.{d}f}%"
-        except Exception:
-            return "N/A"
-
-    def num(x, d=2):
+    # helpers
+    def pct(x, d=1):
+        try: return f"{100*float(x):.{d}f}%"
+        except: return "N/A"
+    def num(x, d=1, money=False):
         try:
             f = float(x)
-            if abs(f) >= 1000:
-                return f"${f:,.0f}" if "revenue" in section_title.lower() else f"{f:,.0f}"
+            if money: return f"${f:,.0f}"
             return f"{f:.{d}f}"
-        except Exception:
-            return "N/A"
+        except: return "N/A"
 
-    # Admissions
-    if "admission" in section_title.lower():
+    # read frames from session
+    gdf = st.session_state.get("_filtered_df_for_summary")
+    daily_adm = st.session_state.get("_daily_adm_for_summary")
+    daily_rev = st.session_state.get("_daily_rev_for_summary")
+
+    # ---------- Admissions ----------
+    if "admission" in section:
+        if gdf is None or daily_adm is None or len(daily_adm) == 0:
+            return "**Admissions – Insights**\nInsufficient data to compute patterns."
+
+        # seasonality & trend
+        adm_by_dow = gdf.groupby(gdf["date_of_admission"].dt.dayofweek).size().reindex(range(7), fill_value=0)
+        dow_vals = adm_by_dow.values.astype(float)
+        weekday_uplift = (dow_vals[:5].mean() - dow_vals[5:].mean()) / max(dow_vals.mean(), 1e-9)
+
+        x = np.arange(len(daily_adm))
+        slope = np.polyfit(x, daily_adm["admissions"].values, 1)[0]  # admissions per day
+        vol = daily_adm["admissions"].std()
+        peak = daily_adm["admissions"].max()
+        mean_adm = daily_adm["admissions"].mean()
+        peak_to_mean = peak / max(mean_adm, 1e-9)
+
+        # best model if available
         metrics = model_results or {}
+        best = None
+        mape_line = ""
         if metrics:
-            best = min(metrics.keys(), key=lambda k: metrics[k].get("MAPE", np.inf))
-            mae = num(metrics[best].get("MAE"))
-            rmse = num(metrics[best].get("RMSE"))
-            mape = num(metrics[best].get("MAPE"))
-            horizon = data_summary.get("forecast_horizon", "N/A")
-            avg_daily = data_summary.get("average_daily_admissions", None)
-            avg_daily_txt = num(avg_daily) if avg_daily is not None else "N/A"
+            best = min(metrics, key=lambda k: metrics[k].get("MAPE", np.inf))
+            mape_line = f" • **Best model**: {best} (MAPE {num(metrics[best].get('MAPE', np.nan),1)}%)"
 
-            exec_block = f"""
-**Admissions Forecasting – Key Insights**
+        body = [
+            f"• **Workload pattern:** weekday volumes are {pct(weekday_uplift)} higher than weekends.",
+            f"• **Trend:** {num(slope,2)} admissions/day change over time (linear slope).",
+            f"• **Volatility:** σ={num(vol,1)}; **peak-to-mean** ratio {num(peak_to_mean,2)} (peak={int(peak)}, mean={num(mean_adm,1)}).",
+            mape_line,
+            "• **Action:** align nurse rosters to weekday peaks; keep a flex pool for 2σ days; revisit forecast weekly.",
+        ]
+        return "**Admissions – Data-Driven Insights**\n" + "\n".join([b for b in body if b])
 
-📊 **What we measured**
-• Records analyzed: **{total_records:,}**  
-• Forecast horizon: **{horizon} days**  
-• Avg daily admissions (hist): **{avg_daily_txt}**
+    # ---------- Revenue ----------
+    if "revenue" in section:
+        if gdf is None or "billing_amount" not in gdf.columns or len(gdf) == 0:
+            return "**Revenue – Insights**\nInsufficient data."
 
-🏆 **Best model**
-• **{best}** with **MAPE {mape}%** (MAE {mae}, RMSE {rmse})
+        # concentration (Pareto)
+        bills = gdf["billing_amount"].sort_values(ascending=False).reset_index(drop=True)
+        top_decile_cut = int(max(1, np.floor(0.1 * len(bills))))
+        top_decile_share = bills.iloc[:top_decile_cut].sum() / max(bills.sum(), 1e-9)
 
-💼 **Operational impact**
-• Use **{best}** for next-{horizon}-day staffing and bed planning  
-• Align float pool scheduling to forecast peaks; track MAPE drift weekly
+        # payer mix skew
+        payer_mix = gdf.groupby("insurance_provider")["billing_amount"].sum().sort_values(ascending=False)
+        top_payer = payer_mix.index[0] if len(payer_mix) else "N/A"
+        top_payer_share = (payer_mix.iloc[0] / payer_mix.sum()) if len(payer_mix) else np.nan
 
-🧩 **Next actions**
-• Backtest weekly; alert if MAPE worsens by >2 pp  
-• Refit with weekly seasonality if weekday effects intensify
-"""
-            analyst_block = f"""
-**Admissions Forecasting – Diagnostics**
+        # day-level volatility & spikes
+        if daily_rev is None or len(daily_rev) == 0:
+            dr_vol = np.nan
+            spike_days = 0
+        else:
+            dr = daily_rev["revenue"].astype(float)
+            dr_vol = dr.std()
+            roll = dr.rolling(7, min_periods=3).mean()
+            spikes = (dr > (roll * 1.25)).sum()
+            spike_days = int(spikes)
 
-• Best: **{best}** → MAE **{mae}**, RMSE **{rmse}**, MAPE **{mape}%**  
-• Recommend residual ACF/PACF review and rolling-origin evaluation  
-• Compare ETS(season=7) vs ARIMA grid; log metrics to model registry
-"""
-            return exec_block if role == "Executive" else analyst_block
-        return "**Admissions Forecasting – Missing Data**\nRun forecasts to populate metrics."
+        # anomaly context if available
+        metrics = model_results or {}
+        best = None
+        anomaly_line = ""
+        if metrics:
+            best = min(metrics.keys(), key=lambda k: abs(metrics[k].get("anomaly_rate", 1.0) - 0.05))
+            det = metrics[best]
+            anomaly_line = f"• **{best}** flags {int(det.get('anomalies_detected',0))} cases ({pct(det.get('anomaly_rate',0))})."
 
-    # Revenue
-    if "revenue" in section_title.lower():
-        results = model_results or {}
-        if results:
-            best = min(results.keys(), key=lambda k: abs(results[k].get("anomaly_rate", 1.0) - 0.05))
-            det = results[best]
-            n_anom = int(det.get("anomalies_detected", 0))
-            rate = pct(det.get("anomaly_rate", 0))
-            avg_amt = num(det.get("avg_anomaly_amount", 0))
-            total_rev = num(data_summary.get("total_revenue", 0))
-            avg_daily_rev = num(data_summary.get("avg_daily_revenue", 0))
+        body = [
+            f"• **Revenue concentration:** top 10% of encounters contribute **{pct(top_decile_share)}** of revenue.",
+            f"• **Payer mix:** **{top_payer}** accounts for **{pct(top_payer_share)}** of revenue.",
+            f"• **Daily volatility:** σ={num(dr_vol,0, money=True)}; **spike days (7-day mean +25%)**: {spike_days}.",
+            anomaly_line,
+            "• **Action:** audit top-decile encounters; negotiate with top payer; set pre-bill rules for spike patterns.",
+        ]
+        return "**Revenue – Data-Driven Insights**\n" + "\n".join([b for b in body if b])
 
-            exec_block = f"""
-**Revenue Pattern Analysis – Key Insights**
+    # ---------- LOS ----------
+    if "length of stay" in section or "los" in section:
+        if gdf is None or "length_of_stay" not in gdf.columns or len(gdf) == 0:
+            return "**LOS – Insights**\nInsufficient data."
 
-💸 **Revenue context**
-• Total observed revenue: **{total_rev}**  
-• Avg daily revenue: **{avg_daily_rev}**
+        los = gdf["length_of_stay"].astype(float)
+        iqr = np.percentile(los, 75) - np.percentile(los, 25)
 
-🕵️ **Detection outcome**
-• Best method: **{best}**  
-• Flagged **{n_anom}** unusual cases (**{rate}** of evaluated records)  
-• Avg flagged amount: **{avg_amt}**
+        # drivers by cohort (simple deltas)
+        lines = []
+        for col in ["medical_condition", "admission_type", "hospital"]:
+            if col in gdf.columns:
+                m = gdf.groupby(col)["length_of_stay"].mean().sort_values(ascending=False)
+                if len(m) >= 2:
+                    head = m.head(1)
+                    tail = m.tail(1)
+                    lines.append(
+                        f"• **{col.replace('_',' ').title()} driver:** {head.index[0]} longer than {tail.index[0]} by {num(head.iloc[0]-tail.iloc[0],1)} days."
+                    )
 
-💼 **Financial implications**
-• Prioritize review of top-decile flags; typical recovery = 10–20% of flagged amount  
-• Route validated rules to pre-bill checks to reduce leakage
+        body = [
+            f"• **Central tendency & spread:** mean={num(los.mean(),1)} days; median={num(los.median(),1)}; IQR={num(iqr,1)}.",
+            *lines[:3],
+            "• **Action:** standardize discharge pathways for highest-LOS cohorts; run a variance-reduction sprint on the IQR tail.",
+        ]
+        return "**LOS – Data-Driven Insights**\n" + "\n".join(body)
 
-🧩 **Next actions**
-• Calibrate contamination near 5% review volume  
-• Add payer mix and DRG features to reduce false positives
-"""
-            analyst_block = f"""
-**Revenue Pattern Analysis – Technical Notes**
-
-• Best detector: **{best}** → anomalies: **{n_anom}** (**{rate}**)  
-• Average anomaly amount: **{avg_amt}**  
-• Validate precision via stratified manual audit; iterate on features (payer, DRG, LOS)
-"""
-            return exec_block if role == "Executive" else analyst_block
-        return "**Revenue Pattern Analysis – Missing Data**\nRun anomaly analysis to populate metrics."
-
-    # LOS
-    if "length of stay" in section_title.lower() or "los" in section_title.lower():
-        results = model_results or {}
-        if results:
-            sample = next(iter(results.values()))
-            is_classification = any(k in sample for k in ["accuracy", "precision", "recall", "f1_score"])
-            if is_classification:
-                best = max(results.keys(), key=lambda k: results[k].get("accuracy", 0))
-                acc = pct(results[best].get("accuracy", 0))
-                f1 = pct(results[best].get("f1_score", 0))
-                prec = pct(results[best].get("precision", 0))
-                rec = pct(results[best].get("recall", 0))
-                avg_los = num(data_summary.get("avg_los", "N/A"))
-
-                exec_block = f"""
-**Length of Stay Prediction – Key Insights**
-
-🏆 **Best classifier:** **{best}**  
-• Accuracy **{acc}**, F1 **{f1}** (Precision **{prec}**, Recall **{rec}**)  
-• Avg LOS (observed): **{avg_los}** days
-
-💼 **Operational impact**
-• Use predicted **Short/Medium/Long/Extended** to trigger discharge pathways and bed turnover planning
-
-🧩 **Next actions**
-• Address class imbalance for **Extended** via class weights; add queue features (ED wait, admission time)
-"""
-                analyst_block = f"""
-**LOS Classification – Diagnostics**
-
-• Best: **{best}** → Acc **{acc}**, F1 **{f1}**, P **{prec}**, R **{rec}**  
-• Inspect per-class report; plot calibration and confusion matrix
-"""
-                return exec_block if role == "Executive" else analyst_block
-            else:
-                best = max(results.keys(), key=lambda k: results[k].get("r2_score", -np.inf))
-                r2 = num(results[best].get("r2_score", np.nan), 3)
-                mae = num(results[best].get("mae", np.nan))
-                rmse = num(results[best].get("rmse", np.nan))
-
-                exec_block = f"""
-**Length of Stay Regression – Key Insights**
-
-🏆 **Best regressor:** **{best}**  
-• R² **{r2}**, MAE **{mae}** days, RMSE **{rmse}** days
-
-💼 **Operational impact**
-• Use expected-LOS for bed capacity forecasts and discharge scheduling
-"""
-                analyst_block = f"""
-**LOS Regression – Diagnostics**
-
-• Best: **{best}** → R² **{r2}**, MAE **{mae}**, RMSE **{rmse}**  
-• Analyze residuals vs. features; consider Huber loss for robustness
-"""
-                return exec_block if role == "Executive" else analyst_block
-        return "**Length of Stay Prediction – Missing Data**\nTrain models to populate metrics."
-
-    return "**Insights**\nProvide section-specific metrics to generate insights."
+    return "**Insights**\nNo matching section."
 
 # ---------- Viz helper ----------
 def plot_model_performance(results: dict, metric: str = "accuracy"):
@@ -523,7 +475,12 @@ print("\\nClassification Report:\\n", classification_report(y_test, y_pred))
     return code
 
 # ---------- Tabs ----------
-tabs = st.tabs(["📈 Admissions Forecasting", "💰 Revenue Analytics", "🛏️ Length of Stay Prediction"])
+tabs = st.tabs([
+    "📈 Admissions Forecasting",
+    "💰 Revenue Analytics",
+    "🛏️ Length of Stay Prediction",
+    "📊 Operational KPIs & Simulator"
+])
 
 # ===================== TAB 1: Admissions Forecasting =====================
 with tabs[0]:
@@ -541,6 +498,10 @@ with tabs[0]:
     daily_adm = filtered_df.groupby(filtered_df["date_of_admission"].dt.date).size().reset_index()
     daily_adm.columns = ["date", "admissions"]
 
+    # Expose frames for Insights
+    st.session_state["_daily_adm_for_summary"] = daily_adm
+    st.session_state["_filtered_df_for_summary"] = filtered_df
+
     c1, c2 = st.columns([2, 1])
     with c1:
         st.subheader("📊 Current Admission Trends")
@@ -555,17 +516,18 @@ with tabs[0]:
             )
         )
         xnum = np.arange(len(daily_adm))
-        z = np.polyfit(xnum, daily_adm["admissions"], 1)
-        p = np.poly1d(z)
-        fig.add_trace(
-            go.Scatter(
-                x=daily_adm["date"],
-                y=p(xnum),
-                mode="lines",
-                name="Trend",
-                line=dict(dash="dash"),
+        if len(daily_adm) >= 2:
+            z = np.polyfit(xnum, daily_adm["admissions"], 1)
+            p = np.poly1d(z)
+            fig.add_trace(
+                go.Scatter(
+                    x=daily_adm["date"],
+                    y=p(xnum),
+                    mode="lines",
+                    name="Trend",
+                    line=dict(dash="dash"),
+                )
             )
-        )
         fig.update_layout(
             title="Daily Hospital Admissions Over Time",
             xaxis_title="Date",
@@ -576,9 +538,9 @@ with tabs[0]:
 
     with c2:
         st.subheader("📈 Key Metrics")
-        avg_daily = daily_adm["admissions"].mean()
-        max_daily = daily_adm["admissions"].max()
-        std_daily = daily_adm["admissions"].std()
+        avg_daily = daily_adm["admissions"].mean() if len(daily_adm) else 0.0
+        max_daily = daily_adm["admissions"].max() if len(daily_adm) else 0
+        std_daily = daily_adm["admissions"].std() if len(daily_adm) else 0.0
         st.markdown(
             f"""
         <div class="metric-card"><h4>Average Daily</h4><h2 style="color:#4285f4;">{avg_daily:.1f}</h2></div>
@@ -616,7 +578,7 @@ with tabs[0]:
             test_data = ts.iloc[train_size:]
 
             # Linear Trend
-            if "Linear Trend" in selected_models:
+            if "Linear Trend" in selected_models and len(train_data) >= 2:
                 try:
                     x = np.arange(len(train_data))
                     coeffs = np.polyfit(x, train_data.values, 1)
@@ -633,7 +595,7 @@ with tabs[0]:
                     st.warning(f"Linear Trend failed: {e}")
 
             # ARIMA
-            if "ARIMA" in selected_models:
+            if "ARIMA" in selected_models and len(train_data) >= 3:
                 try:
                     model = ARIMA(train_data, order=(1, 1, 1))
                     fit = model.fit()
@@ -649,7 +611,7 @@ with tabs[0]:
                     st.warning(f"ARIMA failed: {e}")
 
             # Exponential Smoothing
-            if "Exponential Smoothing" in selected_models:
+            if "Exponential Smoothing" in selected_models and len(train_data) >= 14:
                 try:
                     model = ExponentialSmoothing(train_data, trend="add", seasonal="add", seasonal_periods=7)
                     fit = model.fit()
@@ -665,7 +627,7 @@ with tabs[0]:
                     st.warning(f"Exponential Smoothing failed: {e}")
 
             # Prophet
-            if "Prophet" in selected_models and HAS_PROPHET:
+            if "Prophet" in selected_models and HAS_PROPHET and len(train_data) >= 7:
                 try:
                     p_df = train_data.reset_index()
                     p_df.columns = ["ds", "y"]
@@ -711,23 +673,9 @@ with tabs[0]:
                 figf.update_layout(title="Admission Forecasts by Model", height=500, xaxis_title="Date", yaxis_title="Predicted Admissions")
                 st.plotly_chart(figf, use_container_width=True)
 
-                st.subheader("💼 Business Impact Analysis")
+                # exportable tables
                 best_model = min(results.keys(), key=lambda x: results[x]["MAPE"])
                 best_forecast = forecasts[best_model]
-                cbi1, cbi2, cbi3 = st.columns(3)
-                with cbi1:
-                    avg_forecast = float(np.mean(best_forecast))
-                    st.metric("Avg Daily Admissions (Forecast)", f"{avg_forecast:.1f}",
-                              f"{((avg_forecast - avg_daily) / max(avg_daily,1e-9) * 100):+.1f}%")
-                with cbi2:
-                    peak_forecast = float(np.max(best_forecast))
-                    nurses_needed = int(np.ceil(peak_forecast / 8))  # 8 patients per nurse
-                    st.metric("Peak Day Nursing Staff", f"{nurses_needed} nurses", f"{peak_forecast:.0f} admissions")
-                with cbi3:
-                    capacity_utilization = (avg_forecast / max_daily) * 100 if max_daily else 0.0
-                    st.metric("Capacity Utilization", f"{capacity_utilization:.1f}%")
-
-                st.subheader("👥 Staffing Recommendations")
                 staffing_df = pd.DataFrame(
                     {
                         "Date": future_dates,
@@ -737,13 +685,72 @@ with tabs[0]:
                         "Estimated Cost ($)": (np.ceil(best_forecast / 8) * 350 + np.ceil(best_forecast / 12) * 400).astype(int),
                     }
                 )
+
+                st.subheader("💼 Business Impact Analysis")
+                avg_forecast = float(np.mean(best_forecast))
+                peak_forecast = float(np.max(best_forecast))
+                nurses_needed = int(np.ceil(peak_forecast / 8)) if peak_forecast else 0
+                max_daily = daily_adm["admissions"].max() if len(daily_adm) else 0
+                cbi1, cbi2, cbi3 = st.columns(3)
+                with cbi1:
+                    base = daily_adm["admissions"].mean() if len(daily_adm) else 0.0
+                    st.metric("Avg Daily Admissions (Forecast)", f"{avg_forecast:.1f}",
+                              f"{((avg_forecast - base) / max(base,1e-9) * 100):+.1f}%")
+                with cbi2:
+                    st.metric("Peak Day Nursing Staff", f"{nurses_needed} nurses", f"{peak_forecast:.0f} admissions")
+                with cbi3:
+                    capacity_utilization = (avg_forecast / max_daily) * 100 if max_daily else 0.0
+                    st.metric("Capacity Utilization", f"{capacity_utilization:.1f}%")
+
+                st.subheader("👥 Staffing Recommendations")
                 st.dataframe(staffing_df, use_container_width=True)
 
+                # downloads
+                st.download_button(
+                    "📥 Download Forecast (CSV)",
+                    data=pd.DataFrame({"date": future_dates, "forecast": best_forecast}).to_csv(index=False),
+                    file_name=f"admissions_forecast_{best_model}.csv",
+                    mime="text/csv",
+                )
+                st.download_button(
+                    "📥 Download Staffing Plan (CSV)",
+                    data=staffing_df.to_csv(index=False),
+                    file_name="staffing_plan.csv",
+                    mime="text/csv",
+                )
+
+                # Implementation code (Admissions)
+                with st.expander("💻 View Implementation Code (Admissions)"):
+                    code = f"""
+# Admissions Forecasting — {best_model}
+import pandas as pd
+import numpy as np
+from statsmodels.tsa.arima.model import ARIMA
+
+# daily_admissions: dataframe with ['date','admissions']
+# Assume you've pre-aggregated similarly
+forecast_days = {forecast_days}
+
+# Example training series:
+# ts = daily_admissions.set_index('date')['admissions'].astype(float)
+
+# Train best performing model: {best_model}
+# model = ARIMA(ts, order=(1,1,1))
+# fitted = model.fit()
+# forecast = fitted.forecast(steps=forecast_days)
+
+# Basic staffing helper
+def staffing(pred):
+    day_nurses = int(np.ceil(pred / 8))
+    night_nurses = int(np.ceil(pred / 12))
+    return day_nurses, night_nurses
+"""
+                    st.code(code, language="python")
             else:
                 st.error("No models produced results. Try a shorter forecast horizon or ensure enough history.")
 
     # Business insights (persistent)
-    if "forecasting" in st.session_state.model_results and not st.session_state.model_results["forecasting"] == {}:
+    if "forecasting" in st.session_state.model_results and st.session_state.model_results["forecasting"]:
         st.markdown("---")
         st.markdown("## 📋 Business Insights")
         forecasting_results = st.session_state.model_results["forecasting"]
@@ -777,6 +784,11 @@ with tabs[1]:
             filtered_df.groupby(filtered_df["date_of_admission"].dt.date)["billing_amount"].sum().reset_index()
         )
         daily_rev.columns = ["date", "revenue"]
+
+        # Expose frames for Insights
+        st.session_state["_daily_rev_for_summary"] = daily_rev
+        st.session_state["_filtered_df_for_summary"] = filtered_df
+
         fig = go.Figure()
         fig.add_trace(
             go.Scatter(
@@ -792,9 +804,9 @@ with tabs[1]:
 
     with c2:
         st.subheader("💰 Revenue Metrics")
-        total_revenue = float(filtered_df["billing_amount"].sum())
+        total_revenue = float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0
         avg_daily_revenue = float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0
-        avg_bill = float(filtered_df["billing_amount"].mean()) if len(filtered_df) else 0.0
+        avg_bill = float(filtered_df["billing_amount"].mean()) if "billing_amount" in filtered_df.columns else 0.0
         st.markdown(
             f"""
         <div class="metric-card"><h4>Total Revenue</h4><h2 style="color:#34a853;">${total_revenue:,.0f}</h2></div>
@@ -836,7 +848,7 @@ with tabs[1]:
                         "avg_anomaly_amount": float(
                             filtered_df.loc[X.index[pred == -1], "billing_amount"].mean()
                         )
-                        if n_anom > 0
+                        if n_anom > 0 and "billing_amount" in filtered_df.columns
                         else 0.0,
                     }
 
@@ -851,7 +863,7 @@ with tabs[1]:
                         "avg_anomaly_amount": float(
                             filtered_df.loc[X.index[stat_mask], "billing_amount"].mean()
                         )
-                        if n_anom > 0
+                        if n_anom > 0 and "billing_amount" in filtered_df.columns
                         else 0.0,
                     }
                     anomaly_predictions["Statistical Outliers"] = np.where(stat_mask.values, -1, 1)
@@ -898,10 +910,18 @@ with tabs[1]:
                             ]
                             if c in filtered_df.columns
                         ]
-                        details = filtered_df.loc[anomaly_idx, cols].head(20)
+                        details = filtered_df.loc[anomaly_idx, cols].head(100)
                         st.dataframe(details, use_container_width=True)
 
-                        total_flagged = float(filtered_df.loc[anomaly_idx, "billing_amount"].sum())
+                        # downloads
+                        st.download_button(
+                            "📥 Download Anomaly Cases (CSV)",
+                            data=details.to_csv(index=False),
+                            file_name="revenue_anomalies.csv",
+                            mime="text/csv",
+                        )
+
+                        total_flagged = float(filtered_df.loc[anomaly_idx, "billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0
                         investigation = total_flagged * 0.15
                         m1, m2, m3 = st.columns(3)
                         with m1:
@@ -910,6 +930,35 @@ with tabs[1]:
                             st.metric("Investigation Priority", f"${investigation:,.0f}")
                         with m3:
                             st.metric("Cases for Review", f"{len(anomaly_idx)}")
+
+                # Implementation code (Revenue)
+                if results:
+                    best_method = min(results.keys(), key=lambda x: abs(results[x]["anomaly_rate"] - 0.05))
+                    with st.expander("💻 View Implementation Code (Revenue)"):
+                        code = f"""
+# Revenue Anomaly Detection — {best_method}
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+
+df = pd.read_csv('hospital_revenue.csv')
+features = {features_for_anomaly}
+X = df[features].dropna()
+
+model = IsolationForest(contamination={float(sensitivity)}, random_state=42)
+pred = model.fit_predict(X)
+
+unusual_idx = X.index[pred == -1]
+flagged = df.loc[unusual_idx]
+
+print(f"Anomalies: {{(pred == -1).sum()}} / {{len(X)}} ({{(pred == -1).mean():.2%}})")
+
+# Prioritize: highest billing among anomalies
+if 'billing_amount' in flagged.columns:
+    top10 = flagged.nlargest(10, 'billing_amount')[['date_of_admission','billing_amount','insurance_provider','medical_condition','hospital']]
+    print(top10.to_string(index=False))
+"""
+                        st.code(code, language="python")
         else:
             st.warning("Please select at least one feature for analysis.")
 
@@ -919,7 +968,7 @@ with tabs[1]:
         anomaly_results = st.session_state.model_results["anomaly"]
         best_method = min(anomaly_results.keys(), key=lambda x: abs(anomaly_results[x]["anomaly_rate"] - 0.05))
         data_summary = {
-            "total_revenue": float(filtered_df["billing_amount"].sum()),
+            "total_revenue": float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0,
             "avg_daily_revenue": float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0,
             "best_method": best_method,
             "anomalies_detected": int(anomaly_results[best_method]["anomalies_detected"]),
@@ -1114,129 +1163,3 @@ with tabs[2]:
                         best_model = models_trained[best_model_name]
                         m1, m2, m3 = st.columns(3)
                         if is_classification:
-                            st.metric("Best Model Accuracy", f"{results[best_model_name]['accuracy']:.1%}")
-                            preds = best_model.predict(X_test)
-                            short_rate = float((preds == "Short").sum() / len(preds)) if "Short" in preds else 0.0
-                            m2.metric("Predicted Short Stays", f"{short_rate:.1%}")
-                        else:
-                            ypb = best_model.predict(X_test)
-                            avg_pred = float(np.mean(ypb))
-                            m1.metric("Best Model R²", f"{results[best_model_name]['r2_score']:.3f}")
-                            m2.metric("Avg Predicted LOS", f"{avg_pred:.1f} days")
-                            current_avg = float(filtered_df["length_of_stay"].mean())
-                            m3.metric("Potential LOS Reduction", f"{max(0.0, current_avg - avg_pred):.1f} days")
-
-                        st.subheader("🔮 Sample Predictions")
-                        samples = []
-                        nshow = min(10, len(X_test))
-                        for i in range(nshow):
-                            sample_input = X_test.iloc[[i]]
-                            pred = best_model.predict(sample_input)[0]
-                            if is_classification:
-                                samples.append(
-                                    {
-                                        "Case": f"Patient {i+1}",
-                                        "Predicted Category": str(pred),
-                                        "Actual Category": str(y_test.iloc[i]),
-                                        "Match": "✅" if pred == y_test.iloc[i] else "❌",
-                                    }
-                                )
-                            else:
-                                samples.append(
-                                    {
-                                        "Case": f"Patient {i+1}",
-                                        "Predicted LOS": f"{float(pred):.1f} days",
-                                        "Actual LOS": f"{float(y_test.iloc[i]):.1f} days",
-                                        "Difference": f"{abs(float(pred) - float(y_test.iloc[i])):.1f} days",
-                                    }
-                                )
-                        st.dataframe(pd.DataFrame(samples), use_container_width=True)
-
-                        with st.expander("💻 View Implementation Code"):
-                            # pick a reasonable target string for snippet
-                            target_for_snippet = "los_category" if is_classification else "length_of_stay"
-                            code = generate_python_code(best_model_name, selected_features, target_for_snippet)
-                            st.code(code, language="python")
-                    else:
-                        st.error("All models failed to train. Check feature selection and data quality.")
-            else:
-                st.warning("Please select at least one feature for model training.")
-
-        if "los" in st.session_state.model_results and st.session_state.model_results["los"]:
-            st.markdown("---")
-            st.markdown("## 📋 Business Insights")
-            los_results = st.session_state.model_results["los"]
-            is_cls = bool(st.session_state.get("los_is_classification", False))
-            if is_cls:
-                best_model = max(los_results.keys(), key=lambda x: los_results[x].get("accuracy", 0))
-                perf = los_results[best_model]["accuracy"]
-            else:
-                best_model = max(los_results.keys(), key=lambda x: los_results[x].get("r2_score", -np.inf))
-                perf = los_results[best_model]["r2_score"]
-            data_summary = {
-                "prediction_type": st.session_state.get("los_target_type", "Unknown"),
-                "best_model": best_model,
-                "performance_metric": float(perf),
-                "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
-                "total_patients": len(filtered_df),
-            }
-            insights = generate_business_summary("Length of Stay Prediction", data_summary, los_results)
-            st.markdown(f'<div class="insights-panel">{insights}</div>', unsafe_allow_html=True)
-
-# ===================== Decision Log =====================
-st.markdown("---")
-st.markdown("## 📋 Decision Tracking")
-with st.expander("📝 Add New Decision", expanded=False):
-    d1, d2 = st.columns(2)
-    with d1:
-        decision_section = st.selectbox("Analysis Section", ["Admissions Forecasting", "Revenue Analytics", "Length of Stay Prediction"])
-        decision_action = st.selectbox("Decision", ["Approve for Production", "Needs Review", "Requires Additional Data", "Reject"])
-    with d2:
-        decision_owner = st.text_input("Responsible Person")
-        decision_date = st.date_input("Target Date")
-    decision_notes = st.text_area("Notes and Comments")
-    if st.button("Add Decision", type="secondary"):
-        new_decision = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "section": decision_section,
-            "action": decision_action,
-            "owner": decision_owner,
-            "target_date": decision_date.strftime("%Y-%m-%d"),
-            "notes": decision_notes,
-        }
-        st.session_state.decision_log.append(new_decision)
-        st.success("✅ Decision added to tracking log!")
-
-if st.session_state.decision_log:
-    st.subheader("Decision History")
-    decisions_df = pd.DataFrame(st.session_state.decision_log)
-    c1, c2, c3 = st.columns([2, 1, 1])
-    with c1:
-        st.dataframe(decisions_df, use_container_width=True)
-    with c2:
-        if "action" in decisions_df.columns:
-            approved = int((decisions_df["action"] == "Approve for Production").sum())
-            pending = int((decisions_df["action"] == "Needs Review").sum())
-            st.metric("Approved", approved)
-            st.metric("Pending Review", pending)
-    with c3:
-        csv = decisions_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Log",
-            data=csv,
-            file_name=f"decisions_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            type="secondary",
-        )
-
-# ---------- Footer ----------
-st.markdown("---")
-st.markdown(
-    """
-<div style="text-align:center;color:#666;padding:2rem;">
-    <p>Hospital Operations Analytics Platform • Built with Streamlit & Python ML Libraries</p>
-    <p>For questions or support, contact your analytics team</p>
-</div>
-""",
-    unsafe_allow_html=True,
-)
