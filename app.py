@@ -1,27 +1,28 @@
 # app.py — Hospital Operations Analytics Platform
-# Redesigned with model mapping, LOS category definition, Exec vs Analyst insights, and inline code runner
+# Fixed: no nested f-strings in code blocks; uses string.Template for safe injection.
+# Includes: model mapping, LOS category definitions, Exec vs Analyst insights, inline code runner.
 
 import os
 import io
 import sys
 import warnings
-from datetime import datetime, date, timedelta
-from typing import Dict, Optional, List, Tuple, Any
+from datetime import datetime
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+from string import Template
 
 from sklearn.ensemble import RandomForestClassifier, IsolationForest, RandomForestRegressor
-from sklearn.linear_model import LogisticRegression, LinearRegression, Ridge
+from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.svm import SVC, SVR
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.metrics import (
-    accuracy_score, precision_recall_fscore_support, roc_auc_score,
-    roc_curve, confusion_matrix, classification_report,
+    accuracy_score, precision_recall_fscore_support,
     mean_absolute_error, mean_squared_error, r2_score
 )
 from sklearn.pipeline import Pipeline
@@ -88,58 +89,25 @@ st.markdown(
         margin: 1rem 0;
         box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
-    .insights-panel {
-        background: #ffffff;
-        padding: 1.2rem;
-        border-radius: 12px;
-        border: 1px solid #e9ecef;
-        margin: 1rem 0;
-    }
-    .insight-section-title {
-        font-weight: 700; font-size: 1.1rem; margin: 0.2rem 0 0.6rem 0;
-    }
-    .exec-box, .analyst-box {
-        border-radius: 10px; padding: 1rem; height: 100%;
-    }
-    .exec-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: 1px solid rgba(255,255,255,0.3);
-    }
-    .analyst-box {
-        background: #f8f9ff;
-        border: 1px solid #dbe1ff;
-        color: #1f1f1f;
-    }
+    .insight-section-title { font-weight: 700; font-size: 1.1rem; margin: 0.2rem 0 0.6rem 0; }
+    .exec-box, .analyst-box { border-radius: 10px; padding: 1rem; height: 100%; }
+    .exec-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: 1px solid rgba(255,255,255,0.3); }
+    .analyst-box { background: #f8f9ff; border: 1px solid #dbe1ff; color: #1f1f1f; }
     .config-row {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-        border-left: 4px solid #4285f4;
+        background: #f8f9fa; padding: 1rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #4285f4;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        justify-content: center;
-    }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; justify-content: center; }
     .stTabs [data-baseweb="tab"] {
-        height: 60px;
-        padding: 0 2rem;
-        background-color: #f8f9fa;
-        border-radius: 12px 12px 0 0;
-        font-weight: 500;
+        height: 60px; padding: 0 2rem; background-color: #f8f9fa;
+        border-radius: 12px 12px 0 0; font-weight: 500;
     }
-    .stTabs [aria-selected="true"] {
-        background-color: #4285f4;
-        color: white;
-    }
+    .stTabs [aria-selected="true"] { background-color: #4285f4; color: white; }
     .badge {
         display:inline-block; padding: 2px 8px; font-size: 0.75rem; border-radius: 999px; margin-right: 6px;
         border: 1px solid #e1e5ef; background:#fff; color:#334155;
     }
     .badge.reg { border-color:#d1fae5; background:#ecfdf5; color:#065f46; }
     .badge.cls { border-color:#fee2e2; background:#fef2f2; color:#991b1b; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
     .small { font-size: 0.9rem; color:#444;}
 </style>
 """,
@@ -209,9 +177,7 @@ def load_hospital_data() -> pd.DataFrame:
 
     if {"date_of_admission", "discharge_date"}.issubset(df.columns):
         los = (df["discharge_date"] - df["date_of_admission"]).dt.days
-        # Guard: treat negatives as 0, clip extreme outliers
         df["length_of_stay"] = np.clip(los.fillna(0), 0, 365).astype(int)
-        # Avoid all-zero bins by forcing 0 to 1 day minimum observable stay (business choice)
         df.loc[df["length_of_stay"] == 0, "length_of_stay"] = 1
 
     if "date_of_admission" in df.columns:
@@ -230,7 +196,6 @@ def load_hospital_data() -> pd.DataFrame:
         )
 
     if "length_of_stay" in df.columns:
-        # Save bins/labels so we can show them to the user
         bins = [0, 3, 7, 14, float("inf")]
         labels = ["Short", "Medium", "Long", "Extended"]
         st.session_state["los_bins_info"] = "0–3=Short • 4–7=Medium • 8–14=Long • ≥15=Extended"
@@ -293,7 +258,6 @@ if admission_types:
 if len(filtered_df) != len(df):
     st.info(f"Applied filters: {len(filtered_df):,} of {len(df):,} records selected")
 
-# Make frames available to insight generator (default)
 st.session_state["_filtered_df_for_summary"] = filtered_df
 
 # ---------- Business Insights generator ----------
@@ -313,9 +277,6 @@ def _num(x, d=1, money=False):
         return "N/A"
 
 def generate_business_summary_sections(section_title: str, data_summary: dict, metrics: Optional[dict] = None) -> Tuple[str, str]:
-    """
-    Returns (executive_summary_md, analyst_notes_md)
-    """
     gdf = st.session_state.get("_filtered_df_for_summary")
     daily_adm = st.session_state.get("_daily_adm_for_summary")
     daily_rev = st.session_state.get("_daily_rev_for_summary")
@@ -326,7 +287,6 @@ def generate_business_summary_sections(section_title: str, data_summary: dict, m
     if "admission" in section:
         if gdf is None or daily_adm is None or len(daily_adm) == 0:
             return "**Insufficient data**", "No daily admissions series available."
-        # weekday uplift
         by_dow = gdf.groupby(gdf["date_of_admission"].dt.dayofweek).size().reindex(range(7), fill_value=0).values
         weekday_uplift = (by_dow[:5].mean() - by_dow[5:].mean()) / max(by_dow.mean(), 1e-9)
         x = np.arange(len(daily_adm))
@@ -342,7 +302,7 @@ def generate_business_summary_sections(section_title: str, data_summary: dict, m
             best_line = f"Best model: **{best}** (MAPE {_num(metrics[best].get('MAPE', np.nan),1)})."
 
         exec_lines = [
-            f"**Workload is {_pct(weekday_uplift)} higher on weekdays**; keep staffing aligned to weekday peaks.",
+            f"**Workload is {_pct(weekday_uplift)} higher on weekdays**; align staffing to weekday peaks.",
             f"Trend slope: {_num(slope,2)} admissions/day; peak/mean: {_num(peak_to_mean,2)}.",
             best_line,
             "Revisit forecast weekly; maintain a 2σ flex pool for spikes."
@@ -385,8 +345,8 @@ def generate_business_summary_sections(section_title: str, data_summary: dict, m
         ]
         analyst_lines = [
             f"Daily volatility σ = {_num(dr_vol,0, money=True)}; validate spikes against coding/charge lag.",
-            "Tune contamination (IsolationForest) to 3–7% for stable alert volume.",
-            "Cross-check anomalies by payer, service line, and attending physician."
+            "Tune contamination (IsolationForest) to ~3–7% for stable alert volume.",
+            "Cross-check anomalies by payer, service line, attending physician."
         ]
 
     elif "stay" in section or "los" in section:
@@ -435,16 +395,7 @@ def plot_model_performance(results: dict, metric: str = "accuracy"):
         return None
     models = list(results.keys())
     scores = [results[m].get(metric, 0) for m in models]
-    fig = go.Figure(
-        data=[
-            go.Bar(
-                x=models,
-                y=scores,
-                text=[f"{s:.3f}" for s in scores],
-                textposition="auto",
-            )
-        ]
-    )
+    fig = go.Figure(data=[go.Bar(x=models, y=scores, text=[f"{s:.3f}" for s in scores], textposition="auto")])
     fig.update_layout(
         title=f"Model Performance Comparison — {metric.title()}",
         xaxis_title="Models",
@@ -454,11 +405,9 @@ def plot_model_performance(results: dict, metric: str = "accuracy"):
     )
     return fig
 
-# ---------- Code snippet generator ----------
+# ---------- Code snippet generator (safe with Template) ----------
 def generate_python_code(model_type: str, features: list, target: str, is_classification: bool) -> str:
-    model_block = ""
     if is_classification:
-        # classification choices
         if model_type == "Random Forest":
             model_block = "from sklearn.ensemble import RandomForestClassifier\nmodel = RandomForestClassifier(n_estimators=200, random_state=42)"
         elif model_type == "Logistic Regression":
@@ -470,7 +419,6 @@ def generate_python_code(model_type: str, features: list, target: str, is_classi
         else:
             model_block = "from sklearn.ensemble import RandomForestClassifier\nmodel = RandomForestClassifier(n_estimators=200, random_state=42)"
     else:
-        # regression choices
         if model_type == "Random Forest":
             model_block = "from sklearn.ensemble import RandomForestRegressor\nmodel = RandomForestRegressor(n_estimators=300, random_state=42)"
         elif model_type == "Linear Regression":
@@ -482,19 +430,20 @@ def generate_python_code(model_type: str, features: list, target: str, is_classi
         else:
             model_block = "from sklearn.linear_model import LinearRegression\nmodel = LinearRegression()"
 
-    code = f"""# Hospital Operations Predictive Model — {model_type}
+    tpl = Template(
+        """# Hospital Operations Predictive Model — ${model_type}
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-{"from sklearn.metrics import accuracy_score, classification_report" if is_classification else "from sklearn.metrics import mean_absolute_error, r2_score"}
+${metric_import}
 
 # Load your data
 df = pd.read_csv('hospital_data.csv')
-features = {features}
-target = '{target}'
+features = ${features}
+target = '${target}'
 
 X = df[features]
 y = df[target]
@@ -509,28 +458,48 @@ preprocessor = ColumnTransformer(
     ]
 )
 
-{model_block}
+${model_block}
 
 pipeline = Pipeline([('preprocessor', preprocessor), ('model', model)])
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 pipeline.fit(X_train, y_train)
 
-{"y_pred = pipeline.predict(X_test)\nprint(f'Accuracy: {accuracy_score(y_test, y_pred):.3f}')\nprint('\\nClassification Report:\\n', classification_report(y_test, y_pred))" if is_classification else "y_pred = pipeline.predict(X_test)\nmae = mean_absolute_error(y_test, y_pred)\nr2 = r2_score(y_test, y_pred)\nprint(f'MAE: {mae:.3f}  R^2: {r2:.3f}')"}
+${eval_block}
 
 # Save model if desired:
 # import joblib; joblib.dump(pipeline, 'model.joblib')
 """
-    return code
+    )
+
+    metric_import = (
+        "from sklearn.metrics import accuracy_score, classification_report"
+        if is_classification else
+        "from sklearn.metrics import mean_absolute_error, r2_score"
+    )
+    eval_block = (
+        "y_pred = pipeline.predict(X_test)\nprint(f'Accuracy: {accuracy_score(y_test, y_pred):.3f}')\nprint('\\nClassification Report:\\n', classification_report(y_test, y_pred))"
+        if is_classification else
+        "y_pred = pipeline.predict(X_test)\nmae = mean_absolute_error(y_test, y_pred)\nr2 = r2_score(y_test, y_pred)\nprint(f'MAE: {mae:.3f}  R^2: {r2:.3f}')"
+    )
+
+    return tpl.substitute(
+        model_type=model_type,
+        metric_import=metric_import,
+        features=repr(features),
+        target=target,
+        model_block=model_block,
+        eval_block=eval_block,
+    )
 
 def code_runner(editor_key: str, default_code: str):
-    """
-    Simple, sandbox-y code runner: captures stdout and shows output/errors.
-    """
     st.session_state["code_snippet_store"].setdefault(editor_key, default_code)
-    code = st.text_area("✏️ Editable Implementation Code (you can modify and run)", 
-                        value=st.session_state["code_snippet_store"][editor_key],
-                        height=260, key=f"code_editor_{editor_key}")
+    code = st.text_area(
+        "✏️ Editable Implementation Code (you can modify and run)",
+        value=st.session_state["code_snippet_store"][editor_key],
+        height=260,
+        key=f"code_editor_{editor_key}",
+    )
     colr1, colr2 = st.columns([1,3])
     with colr1:
         run_it = st.button("▶️ Run Code", key=f"run_{editor_key}", type="secondary")
@@ -538,16 +507,13 @@ def code_runner(editor_key: str, default_code: str):
         st.caption("This executes the snippet in a restricted namespace with pandas/numpy/sklearn available.")
     if run_it:
         fake_stdout = io.StringIO()
-        # Very restricted globals; expose only minimal safe items
-        safe_globals = {
-            "__builtins__": {
-                "print": print, "range": range, "len": len, "min": min, "max": max, "sum": sum,
-                "abs": abs, "round": round, "float": float, "int": int, "str": str, "list": list, "dict": dict, "set": set
-            }
-        }
+        safe_globals = {"__builtins__": {
+            "print": print, "range": range, "len": len, "min": min, "max": max, "sum": sum,
+            "abs": abs, "round": round, "float": float, "int": int, "str": str, "list": list,
+            "dict": dict, "set": set
+        }}
         safe_locals = {}
         try:
-            # capture stdout
             old_stdout = sys.stdout
             sys.stdout = fake_stdout
             exec(code, safe_globals, safe_locals)
@@ -584,11 +550,9 @@ with tabs[0]:
         unsafe_allow_html=True,
     )
 
-    # Daily admissions
     daily_adm = filtered_df.groupby(filtered_df["date_of_admission"].dt.date).size().reset_index()
     daily_adm.columns = ["date", "admissions"]
 
-    # Expose frames for Insights
     st.session_state["_daily_adm_for_summary"] = daily_adm
     st.session_state["_filtered_df_for_summary"] = filtered_df
 
@@ -596,34 +560,13 @@ with tabs[0]:
     with c1:
         st.subheader("📊 Current Admission Trends")
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=daily_adm["date"],
-                y=daily_adm["admissions"],
-                mode="lines+markers",
-                name="Daily Admissions",
-                line=dict(width=2),
-            )
-        )
+        fig.add_trace(go.Scatter(x=daily_adm["date"], y=daily_adm["admissions"], mode="lines+markers", name="Daily Admissions", line=dict(width=2)))
         xnum = np.arange(len(daily_adm))
         if len(daily_adm) >= 2:
             z = np.polyfit(xnum, daily_adm["admissions"], 1)
             p = np.poly1d(z)
-            fig.add_trace(
-                go.Scatter(
-                    x=daily_adm["date"],
-                    y=p(xnum),
-                    mode="lines",
-                    name="Trend",
-                    line=dict(dash="dash"),
-                )
-            )
-        fig.update_layout(
-            title="Daily Hospital Admissions Over Time",
-            xaxis_title="Date",
-            yaxis_title="Number of Admissions",
-            height=400,
-        )
+            fig.add_trace(go.Scatter(x=daily_adm["date"], y=p(xnum), mode="lines", name="Trend", line=dict(dash="dash")))
+        fig.update_layout(title="Daily Hospital Admissions Over Time", xaxis_title="Date", yaxis_title="Number of Admissions", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
@@ -667,7 +610,6 @@ with tabs[0]:
             train_data = ts.iloc[:train_size]
             test_data = ts.iloc[train_size:]
 
-            # Linear Trend
             if "Linear Trend" in selected_models and len(train_data) >= 2:
                 try:
                     x = np.arange(len(train_data))
@@ -684,7 +626,6 @@ with tabs[0]:
                 except Exception as e:
                     st.warning(f"Linear Trend failed: {e}")
 
-            # ARIMA
             if "ARIMA" in selected_models and len(train_data) >= 3:
                 try:
                     model = ARIMA(train_data, order=(1, 1, 1))
@@ -700,7 +641,6 @@ with tabs[0]:
                 except Exception as e:
                     st.warning(f"ARIMA failed: {e}")
 
-            # Exponential Smoothing
             if "Exponential Smoothing" in selected_models and len(train_data) >= 14:
                 try:
                     model = ExponentialSmoothing(train_data, trend="add", seasonal="add", seasonal_periods=7)
@@ -716,7 +656,6 @@ with tabs[0]:
                 except Exception as e:
                     st.warning(f"Exponential Smoothing failed: {e}")
 
-            # Prophet
             if "Prophet" in selected_models and HAS_PROPHET and len(train_data) >= 7:
                 try:
                     p_df = train_data.reset_index()
@@ -762,22 +701,13 @@ with tabs[0]:
                 for i, (name, fc) in enumerate(forecasts.items()):
                     figf.add_trace(
                         go.Scatter(
-                            x=future_dates,
-                            y=fc,
-                            mode="lines+markers",
-                            name=f"{name} Forecast",
-                            line=dict(dash="dash", width=2, color=palette[i % len(palette)]),
+                            x=future_dates, y=fc, mode="lines+markers",
+                            name=f"{name} Forecast", line=dict(dash="dash", width=2, color=palette[i % len(palette)])
                         )
                     )
-                figf.update_layout(
-                    title="Admission Forecasts by Model",
-                    height=500,
-                    xaxis_title="Date",
-                    yaxis_title="Predicted Admissions",
-                )
+                figf.update_layout(title="Admission Forecasts by Model", height=500, xaxis_title="Date", yaxis_title="Predicted Admissions")
                 st.plotly_chart(figf, use_container_width=True)
 
-                # exportable tables
                 best_model = min(results.keys(), key=lambda x: results[x]["MAPE"])
                 best_forecast = forecasts[best_model]
                 staffing_df = pd.DataFrame(
@@ -786,9 +716,7 @@ with tabs[0]:
                         "Predicted Admissions": best_forecast.astype(int),
                         "Day Shift Nurses": np.ceil(best_forecast / 8).astype(int),
                         "Night Shift Nurses": np.ceil(best_forecast / 12).astype(int),
-                        "Estimated Cost ($)": (
-                            np.ceil(best_forecast / 8) * 350 + np.ceil(best_forecast / 12) * 400
-                        ).astype(int),
+                        "Estimated Cost ($)": (np.ceil(best_forecast / 8) * 350 + np.ceil(best_forecast / 12) * 400).astype(int),
                     }
                 )
 
@@ -800,11 +728,7 @@ with tabs[0]:
                 cbi1, cbi2, cbi3 = st.columns(3)
                 with cbi1:
                     base = daily_adm["admissions"].mean() if len(daily_adm) else 0.0
-                    st.metric(
-                        "Avg Daily Admissions (Forecast)",
-                        f"{avg_forecast:.1f}",
-                        f"{((avg_forecast - base) / max(base,1e-9) * 100):+.1f}%",
-                    )
+                    st.metric("Avg Daily Admissions (Forecast)", f"{avg_forecast:.1f}", f"{((avg_forecast - base) / max(base,1e-9) * 100):+.1f}%")
                 with cbi2:
                     st.metric("Peak Day Nursing Staff", f"{nurses_needed} nurses", f"{peak_forecast:.0f} admissions")
                 with cbi3:
@@ -814,7 +738,6 @@ with tabs[0]:
                 st.subheader("👥 Staffing Recommendations")
                 st.dataframe(staffing_df, use_container_width=True)
 
-                # downloads
                 st.download_button(
                     "📥 Download Forecast (CSV)",
                     data=pd.DataFrame({"date": future_dates, "forecast": best_forecast}).to_csv(index=False),
@@ -828,16 +751,15 @@ with tabs[0]:
                     mime="text/csv",
                 )
 
-                # Implementation code (Admissions) + runner
                 with st.expander("💻 View / Edit / Run Implementation Code (Admissions)"):
-                    code = f"""
-# Admissions Forecasting — {best_model}
+                    admissions_tpl = Template(
+                        """# Admissions Forecasting — ${best_model}
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
 
 # daily_admissions: dataframe with ['date','admissions']
-forecast_days = {forecast_days}
+forecast_days = ${forecast_days}
 
 # Example (ARIMA); replace with your selected model impl:
 # ts = daily_admissions.set_index('date')['admissions'].astype(float)
@@ -850,20 +772,17 @@ def staffing(pred):
     night_nurses = int(np.ceil(pred / 12))
     return day_nurses, night_nurses
 """
+                    )
+                    code = admissions_tpl.substitute(best_model=best_model, forecast_days=forecast_days)
                     code_runner("admissions_impl", code)
             else:
                 st.error("No models produced results. Try a shorter forecast horizon or ensure enough history.")
 
-    # Business insights (Exec vs Analyst)
     if "forecasting" in st.session_state.model_results and st.session_state.model_results["forecasting"]:
         st.markdown("---")
         st.markdown("## 📋 Business Insights")
         forecasting_results = st.session_state.model_results["forecasting"]
-        data_summary = {
-            "total_records": len(filtered_df),
-            "forecast_horizon": locals().get("forecast_days", 14),
-            "average_daily_admissions": float(daily_adm["admissions"].mean()) if len(daily_adm) else 0.0,
-        }
+        data_summary = {"total_records": len(filtered_df), "forecast_horizon": locals().get("forecast_days", 14)}
         exec_md, analyst_md = generate_business_summary_sections("Admissions Forecasting", data_summary, forecasting_results)
         ce, ca = st.columns(2)
         with ce:
@@ -893,20 +812,11 @@ with tabs[1]:
         )
         daily_rev.columns = ["date", "revenue"]
 
-        # Expose frames for Insights
         st.session_state["_daily_rev_for_summary"] = daily_rev
         st.session_state["_filtered_df_for_summary"] = filtered_df
 
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=daily_rev["date"],
-                y=daily_rev["revenue"],
-                mode="lines+markers",
-                name="Daily Revenue",
-                line=dict(width=2),
-            )
-        )
+        fig.add_trace(go.Scatter(x=daily_rev["date"], y=daily_rev["revenue"], mode="lines+markers", name="Daily Revenue", line=dict(width=2)))
         fig.update_layout(title="Daily Hospital Revenue", xaxis_title="Date", yaxis_title="Revenue ($)", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -1006,22 +916,10 @@ with tabs[1]:
                     anomaly_idx = X.index[np.where(best_pred == -1)[0]]
                     if len(anomaly_idx) > 0:
                         st.subheader("🚨 Unusual Cases Identified")
-                        cols = [
-                            c
-                            for c in [
-                                "date_of_admission",
-                                "billing_amount",
-                                "medical_condition",
-                                "hospital",
-                                "insurance_provider",
-                                "doctor",
-                            ]
-                            if c in filtered_df.columns
-                        ]
+                        cols = [c for c in ["date_of_admission","billing_amount","medical_condition","hospital","insurance_provider","doctor"] if c in filtered_df.columns]
                         details = filtered_df.loc[anomaly_idx, cols].head(100)
                         st.dataframe(details, use_container_width=True)
 
-                        # downloads
                         st.download_button(
                             "📥 Download Anomaly Cases (CSV)",
                             data=details.to_csv(index=False),
@@ -1032,52 +930,50 @@ with tabs[1]:
                         total_flagged = float(filtered_df.loc[anomaly_idx, "billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0
                         investigation = total_flagged * 0.15
                         m1, m2, m3 = st.columns(3)
-                        with m1:
-                            st.metric("Total Flagged Amount", f"${total_flagged:,.0f}")
-                        with m2:
-                            st.metric("Investigation Priority", f"${investigation:,.0f}")
-                        with m3:
-                            st.metric("Cases for Review", f"{len(anomaly_idx)}")
+                        with m1: st.metric("Total Flagged Amount", f"${total_flagged:,.0f}")
+                        with m2: st.metric("Investigation Priority", f"${investigation:,.0f}")
+                        with m3: st.metric("Cases for Review", f"{len(anomaly_idx)}")
 
-                # Implementation code (Revenue) + runner
                 if results:
                     best_method = min(results.keys(), key=lambda x: abs(results[x]["anomaly_rate"] - 0.05))
-                    with st.expander("💻 View / Edit / Run Implementation Code (Revenue)"):
-                        code = f"""
-# Revenue Anomaly Detection — {best_method}
+                    revenue_tpl = Template(
+                        """# Revenue Anomaly Detection — ${best_method}
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
 
 df = pd.read_csv('hospital_revenue.csv')
-features = {features_for_anomaly}
+features = ${features}
 X = df[features].dropna()
 
-model = IsolationForest(contamination={float(sensitivity)}, random_state=42)
+model = IsolationForest(contamination=${contamination}, random_state=42)
 pred = model.fit_predict(X)
 
 unusual_idx = X.index[pred == -1]
 flagged = df.loc[unusual_idx]
 
-print(f"Anomalies: {{(pred == -1).sum()}} / {{len(X)}} ({{(pred == -1).mean():.2%}})")
+print(f"Anomalies: {(pred == -1).sum()} / {len(X)} ({(pred == -1).mean():.2%})")
 
 if 'billing_amount' in flagged.columns:
     top10 = flagged.nlargest(10, 'billing_amount')[['date_of_admission','billing_amount','insurance_provider','medical_condition','hospital']]
     print(top10.to_string(index=False))
 """
+                    )
+                    code = revenue_tpl.substitute(
+                        best_method=best_method,
+                        features=repr(features_for_anomaly),
+                        contamination=float(sensitivity),
+                    )
+                    with st.expander("💻 View / Edit / Run Implementation Code (Revenue)"):
                         code_runner("revenue_impl", code)
         else:
             st.warning("Please select at least one feature for analysis.")
 
-    # Exec vs Analyst insights
     if "anomaly" in st.session_state.model_results and st.session_state.model_results["anomaly"]:
         st.markdown("---")
         st.markdown("## 📋 Business Insights")
         anomaly_results = st.session_state.model_results["anomaly"]
-        data_summary = {
-            "total_revenue": float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0,
-            "avg_daily_revenue": float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0,
-        }
+        data_summary = {"total_revenue": float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0}
         exec_md, analyst_md = generate_business_summary_sections("Revenue Pattern Analysis", data_summary, anomaly_results)
         ce, ca = st.columns(2)
         with ce:
@@ -1099,10 +995,8 @@ with tabs[2]:
         unsafe_allow_html=True,
     )
 
-    # LOS category definition block
     st.info(f"**LOS Categories:** {st.session_state.get('los_bins_info', 'Short/Medium/Long/Extended based on days')}", icon="ℹ️")
 
-    # Model mapping badges
     st.markdown(
         """
 <div class="small">
@@ -1120,9 +1014,7 @@ with tabs[2]:
         c1, c2 = st.columns([2, 1])
         with c1:
             st.subheader("📊 Length of Stay Distribution")
-            fig = px.histogram(
-                filtered_df, x="length_of_stay", nbins=30, title="Distribution of Length of Stay"
-            )
+            fig = px.histogram(filtered_df, x="length_of_stay", nbins=30, title="Distribution of Length of Stay")
             fig.update_layout(height=400, xaxis_title="Length of Stay (days)", yaxis_title="Number of Patients")
             st.plotly_chart(fig, use_container_width=True)
         with c2:
@@ -1145,8 +1037,7 @@ with tabs[2]:
         with b1:
             if "medical_condition" in filtered_df.columns:
                 fig = px.box(filtered_df, x="medical_condition", y="length_of_stay", title="LOS by Medical Condition")
-                fig.update_xaxes(tickangle=45)
-                fig.update_layout(height=400)
+                fig.update_xaxes(tickangle=45); fig.update_layout(height=400)
                 st.plotly_chart(fig, use_container_width=True)
         with b2:
             if "admission_type" in filtered_df.columns:
@@ -1156,10 +1047,7 @@ with tabs[2]:
 
         st.markdown('<div class="config-row"><h4>🔧 Prediction Model Setup</h4></div>', unsafe_allow_html=True)
 
-        available_features = [
-            c for c in filtered_df.columns
-            if c not in ["length_of_stay", "los_category", "date_of_admission", "discharge_date"]
-        ]
+        available_features = [c for c in filtered_df.columns if c not in ["length_of_stay", "los_category", "date_of_admission", "discharge_date"]]
         s1, s2 = st.columns(2)
         with s1:
             selected_features = st.multiselect(
@@ -1169,15 +1057,12 @@ with tabs[2]:
             )
         with s2:
             target_type = st.selectbox("Prediction Target", ["Length of Stay (Days)", "LOS Category (Short/Medium/Long/Extended)"])
-
-            # Show model choices with correct mapping
             if target_type.startswith("Length of Stay (Days)"):
                 default_models = ["Random Forest", "Linear Regression"]
                 model_choices = ["Random Forest", "Linear Regression", "XGBoost", "SVM"] if HAS_XGBOOST else ["Random Forest", "Linear Regression", "SVM"]
             else:
                 default_models = ["Random Forest", "Logistic Regression"]
                 model_choices = ["Random Forest", "Logistic Regression", "XGBoost", "SVM"] if HAS_XGBOOST else ["Random Forest", "Logistic Regression", "SVM"]
-
             selected_models = st.multiselect("Select Models", model_choices, default=default_models)
 
         if st.button("🚀 Train Prediction Models", key="train_los", type="primary"):
@@ -1185,11 +1070,9 @@ with tabs[2]:
                 with st.spinner("Training LOS prediction models..."):
                     feature_data = filtered_df[selected_features + ["length_of_stay", "los_category"]].dropna()
                     if target_type.startswith("Length of Stay (Days)"):
-                        target = "length_of_stay"
-                        is_classification = False
+                        target = "length_of_stay"; is_classification = False
                     else:
-                        target = "los_category"
-                        is_classification = True
+                        target = "los_category"; is_classification = True
 
                     st.session_state["los_is_classification"] = is_classification
                     st.session_state["los_target_type"] = target_type
@@ -1297,11 +1180,7 @@ with tabs[2]:
                         if is_classification:
                             m1.metric("Best Model Accuracy", f"{results[best_model_name]['accuracy']:.1%}")
                             preds = best_model.predict(X_test)
-                            short_rate = (
-                                float((pd.Series(preds) == "Short").sum()) / len(preds)
-                                if hasattr(preds, "__len__") and len(preds) > 0
-                                else 0.0
-                            )
+                            short_rate = (float((pd.Series(preds) == "Short").sum()) / len(preds)) if len(preds) > 0 else 0.0
                             m2.metric("Predicted Short Stays", f"{short_rate:.1%}")
                             m3.metric("Classes", ", ".join(sorted(map(str, pd.Series(y_test).unique()))))
                         else:
@@ -1320,25 +1199,17 @@ with tabs[2]:
                             pred = best_model.predict(sample_input)[0]
                             if is_classification:
                                 samples.append(
-                                    {
-                                        "Case": f"Patient {i+1}",
-                                        "Predicted Category": str(pred),
-                                        "Actual Category": str(y_test.iloc[i]),
-                                        "Match": "✅" if pred == y_test.iloc[i] else "❌",
-                                    }
+                                    {"Case": f"Patient {i+1}", "Predicted Category": str(pred),
+                                     "Actual Category": str(y_test.iloc[i]), "Match": "✅" if pred == y_test.iloc[i] else "❌"}
                                 )
                             else:
                                 samples.append(
-                                    {
-                                        "Case": f"Patient {i+1}",
-                                        "Predicted LOS": f"{float(pred):.1f} days",
-                                        "Actual LOS": f"{float(y_test.iloc[i]):.1f} days",
-                                        "Difference": f"{abs(float(pred) - float(y_test.iloc[i])):.1f} days",
-                                    }
+                                    {"Case": f"Patient {i+1}", "Predicted LOS": f"{float(pred):.1f} days",
+                                     "Actual LOS": f"{float(y_test.iloc[i]):.1f} days",
+                                     "Difference": f"{abs(float(pred) - float(y_test.iloc[i])):.1f} days"}
                                 )
                         st.dataframe(pd.DataFrame(samples), use_container_width=True)
 
-                        # Editable implementation code + runner
                         with st.expander("💻 View / Edit / Run Implementation Code (LOS)"):
                             tgt = "los_category" if is_classification else "length_of_stay"
                             code = generate_python_code(best_model_name, selected_features, tgt, is_classification)
@@ -1348,16 +1219,13 @@ with tabs[2]:
             else:
                 st.warning("Please select at least one feature for model training.")
 
-        # Exec vs Analyst insights for LOS
         if "los" in st.session_state.model_results and st.session_state.model_results["los"]:
             st.markdown("---")
             st.markdown("## 📋 Business Insights")
             los_results = st.session_state.model_results["los"]
-            data_summary = {
-                "prediction_type": st.session_state.get("los_target_type", "Unknown"),
-                "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
-                "total_patients": len(filtered_df),
-            }
+            data_summary = {"prediction_type": st.session_state.get("los_target_type", "Unknown"),
+                            "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
+                            "total_patients": len(filtered_df)}
             exec_md, analyst_md = generate_business_summary_sections("Length of Stay Prediction", data_summary, los_results)
             ce, ca = st.columns(2)
             with ce:
@@ -1392,12 +1260,8 @@ with tabs[3]:
             top_cond = filtered_df["medical_condition"].value_counts().idxmax()
             st.metric("Top Condition", str(top_cond))
 
-    # Pareto of revenue by payer
     if {"insurance_provider","billing_amount"}.issubset(filtered_df.columns) and len(filtered_df):
-        payer_rev = (
-            filtered_df.groupby("insurance_provider")["billing_amount"]
-            .sum().sort_values(ascending=False).reset_index()
-        )
+        payer_rev = (filtered_df.groupby("insurance_provider")["billing_amount"].sum().sort_values(ascending=False).reset_index())
         figp = px.bar(payer_rev, x="insurance_provider", y="billing_amount", title="Revenue by Payer (Pareto)")
         figp.update_layout(height=380, xaxis_title="Payer", yaxis_title="Revenue ($)")
         st.plotly_chart(figp, use_container_width=True)
@@ -1411,7 +1275,6 @@ with tabs[3]:
     with w3:
         surge_pct = st.slider("Potential Surge (%)", 0, 50, 15, 5)
 
-    # use recent admissions mean (last 28 days if possible)
     daily_adm_local = filtered_df.groupby(filtered_df["date_of_admission"].dt.date).size().reset_index()
     daily_adm_local.columns = ["date","admissions"]
     recent_mean = float(daily_adm_local["admissions"].tail(28).mean()) if len(daily_adm_local) else 0.0
@@ -1429,13 +1292,13 @@ with tabs[3]:
         st.metric("Est. Daily Cost", f"${est_cost:,.0f}")
 
     with st.expander("💻 View / Edit / Run Implementation Code (Simulator)"):
-        sim_code = f'''
-import numpy as np
+        sim_tpl = Template(
+            """import numpy as np
 
-recent_mean = {recent_mean:.2f}
-surge = {surge_pct}/100.0
-pts_per_day_nurse = {pts_per_day_nurse}
-pts_per_night_nurse = {pts_per_night_nurse}
+recent_mean = ${recent_mean}
+surge = ${surge}
+pts_per_day_nurse = ${ppdn}
+pts_per_night_nurse = ${ppnn}
 
 target_load = recent_mean * (1 + surge)
 day_nurses = int(np.ceil(target_load / max(1, pts_per_day_nurse)))
@@ -1444,7 +1307,14 @@ daily_cost = day_nurses*350 + night_nurses*400
 
 print("Target Admissions:", round(target_load,1))
 print("Day Nurses:", day_nurses, "Night Nurses:", night_nurses, "Daily Cost: $", daily_cost)
-'''
+"""
+        )
+        sim_code = sim_tpl.substitute(
+            recent_mean=f"{recent_mean:.2f}",
+            surge=surge_pct/100.0,
+            ppdn=pts_per_day_nurse,
+            ppnn=pts_per_night_nurse,
+        )
         code_runner("sim_impl", sim_code)
 
 # ===================== Decision Log =====================
@@ -1480,7 +1350,7 @@ with st.expander("📝 Add New Decision", expanded=False):
 if st.session_state.decision_log:
     st.subheader("Decision History")
     decisions_df = pd.DataFrame(st.session_state.decision_log)
-    c1, c2, c3 = st.columns([2, 1, 1])
+    c1, c2, _ = st.columns([2, 1, 1])
     with c1:
         st.dataframe(decisions_df, use_container_width=True)
     with c2:
@@ -1489,15 +1359,15 @@ if st.session_state.decision_log:
             pending = int((decisions_df["action"] == "Needs Review").sum())
             st.metric("Approved", approved)
             st.metric("Pending Review", pending)
-    with c3:
-        csv = decisions_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Log",
-            data=csv,
-            file_name=f"decisions_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            type="secondary",
-        )
+
+    csv = decisions_df.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Log",
+        data=csv,
+        file_name=f"decisions_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+        type="secondary",
+    )
 
 # ---------- Footer ----------
 st.markdown("---")
