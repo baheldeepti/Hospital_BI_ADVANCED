@@ -264,19 +264,24 @@ st.session_state["_filtered_df_for_summary"] = filtered_df
 # ---------- Data-first Business Insights generator ----------
 def generate_business_summary(section_title: str, data_summary: dict, model_results: Optional[dict] = None) -> str:
     role = st.session_state.get("USER_ROLE", "Executive")
-    total_records = int(data_summary.get("total_records", 0))
+    _ = int(data_summary.get("total_records", 0))
     section = section_title.lower()
 
     # helpers
     def pct(x, d=1):
-        try: return f"{100*float(x):.{d}f}%"
-        except: return "N/A"
+        try:
+            return f"{100*float(x):.{d}f}%"
+        except Exception:
+            return "N/A"
+
     def num(x, d=1, money=False):
         try:
             f = float(x)
-            if money: return f"${f:,.0f}"
+            if money:
+                return f"${f:,.0f}"
             return f"{f:.{d}f}"
-        except: return "N/A"
+        except Exception:
+            return "N/A"
 
     # read frames from session
     gdf = st.session_state.get("_filtered_df_for_summary")
@@ -345,7 +350,6 @@ def generate_business_summary(section_title: str, data_summary: dict, model_resu
 
         # anomaly context if available
         metrics = model_results or {}
-        best = None
         anomaly_line = ""
         if metrics:
             best = min(metrics.keys(), key=lambda k: abs(metrics[k].get("anomaly_rate", 1.0) - 0.05))
@@ -653,24 +657,38 @@ with tabs[0]:
                 st.success("✅ Forecasting models trained successfully!")
                 st.subheader("📊 Model Performance Comparison")
                 res_df = pd.DataFrame(results).T
+
                 def highlight_best(s):
                     is_min = s == s.min()
                     return ["background-color:#d4edda;color:#155724" if v else "" for v in is_min]
+
                 st.dataframe(res_df.style.apply(highlight_best, axis=0).format("{:.2f}"), use_container_width=True)
 
                 st.subheader("🔮 Admission Forecasts")
-                future_dates = pd.date_range(start=pd.to_datetime(ts.index[-1]) + pd.Timedelta(days=1),
-                                             periods=forecast_days, freq="D")
+                future_dates = pd.date_range(
+                    start=pd.to_datetime(ts.index[-1]) + pd.Timedelta(days=1),
+                    periods=forecast_days,
+                    freq="D",
+                )
                 figf = go.Figure()
                 figf.add_trace(go.Scatter(x=ts.index, y=ts.values, mode="lines", name="Historical"))
                 palette = ["#34a853", "#ea4335", "#fbbc04", "#9aa0a6"]
                 for i, (name, fc) in enumerate(forecasts.items()):
                     figf.add_trace(
-                        go.Scatter(x=future_dates, y=fc, mode="lines+markers",
-                                   name=f"{name} Forecast",
-                                   line=dict(dash="dash", width=2, color=palette[i % len(palette)]))
+                        go.Scatter(
+                            x=future_dates,
+                            y=fc,
+                            mode="lines+markers",
+                            name=f"{name} Forecast",
+                            line=dict(dash="dash", width=2, color=palette[i % len(palette)]),
+                        )
                     )
-                figf.update_layout(title="Admission Forecasts by Model", height=500, xaxis_title="Date", yaxis_title="Predicted Admissions")
+                figf.update_layout(
+                    title="Admission Forecasts by Model",
+                    height=500,
+                    xaxis_title="Date",
+                    yaxis_title="Predicted Admissions",
+                )
                 st.plotly_chart(figf, use_container_width=True)
 
                 # exportable tables
@@ -682,7 +700,9 @@ with tabs[0]:
                         "Predicted Admissions": best_forecast.astype(int),
                         "Day Shift Nurses": np.ceil(best_forecast / 8).astype(int),
                         "Night Shift Nurses": np.ceil(best_forecast / 12).astype(int),
-                        "Estimated Cost ($)": (np.ceil(best_forecast / 8) * 350 + np.ceil(best_forecast / 12) * 400).astype(int),
+                        "Estimated Cost ($)": (
+                            np.ceil(best_forecast / 8) * 350 + np.ceil(best_forecast / 12) * 400
+                        ).astype(int),
                     }
                 )
 
@@ -694,8 +714,11 @@ with tabs[0]:
                 cbi1, cbi2, cbi3 = st.columns(3)
                 with cbi1:
                     base = daily_adm["admissions"].mean() if len(daily_adm) else 0.0
-                    st.metric("Avg Daily Admissions (Forecast)", f"{avg_forecast:.1f}",
-                              f"{((avg_forecast - base) / max(base,1e-9) * 100):+.1f}%")
+                    st.metric(
+                        "Avg Daily Admissions (Forecast)",
+                        f"{avg_forecast:.1f}",
+                        f"{((avg_forecast - base) / max(base,1e-9) * 100):+.1f}%",
+                    )
                 with cbi2:
                     st.metric("Peak Day Nursing Staff", f"{nurses_needed} nurses", f"{peak_forecast:.0f} admissions")
                 with cbi3:
@@ -728,18 +751,13 @@ import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
 
 # daily_admissions: dataframe with ['date','admissions']
-# Assume you've pre-aggregated similarly
 forecast_days = {forecast_days}
 
-# Example training series:
 # ts = daily_admissions.set_index('date')['admissions'].astype(float)
-
-# Train best performing model: {best_model}
 # model = ARIMA(ts, order=(1,1,1))
 # fitted = model.fit()
 # forecast = fitted.forecast(steps=forecast_days)
 
-# Basic staffing helper
 def staffing(pred):
     day_nurses = int(np.ceil(pred / 8))
     night_nurses = int(np.ceil(pred / 12))
@@ -953,7 +971,6 @@ flagged = df.loc[unusual_idx]
 
 print(f"Anomalies: {{(pred == -1).sum()}} / {{len(X)}} ({{(pred == -1).mean():.2%}})")
 
-# Prioritize: highest billing among anomalies
 if 'billing_amount' in flagged.columns:
     top10 = flagged.nlargest(10, 'billing_amount')[['date_of_admission','billing_amount','insurance_provider','medical_condition','hospital']]
     print(top10.to_string(index=False))
@@ -1163,3 +1180,220 @@ with tabs[2]:
                         best_model = models_trained[best_model_name]
                         m1, m2, m3 = st.columns(3)
                         if is_classification:
+                            m1.metric("Best Model Accuracy", f"{results[best_model_name]['accuracy']:.1%}")
+                            preds = best_model.predict(X_test)
+                            short_rate = (
+                                float((preds == "Short").sum()) / len(preds)
+                                if hasattr(preds, "__len__") and len(preds) > 0
+                                else 0.0
+                            )
+                            m2.metric("Predicted Short Stays", f"{short_rate:.1%}")
+                            m3.metric("Classes", ", ".join(sorted(map(str, pd.Series(y_test).unique()))))
+                        else:
+                            ypb = best_model.predict(X_test)
+                            avg_pred = float(np.mean(ypb)) if len(ypb) else 0.0
+                            m1.metric("Best Model R²", f"{results[best_model_name]['r2_score']:.3f}")
+                            m2.metric("Avg Predicted LOS", f"{avg_pred:.1f} days")
+                            current_avg = float(filtered_df["length_of_stay"].mean())
+                            m3.metric("Potential LOS Reduction", f"{max(0.0, current_avg - avg_pred):.1f} days")
+
+                        st.subheader("🔮 Sample Predictions")
+                        samples = []
+                        nshow = min(10, len(X_test))
+                        for i in range(nshow):
+                            sample_input = X_test.iloc[[i]]
+                            pred = best_model.predict(sample_input)[0]
+                            if is_classification:
+                                samples.append(
+                                    {
+                                        "Case": f"Patient {i+1}",
+                                        "Predicted Category": str(pred),
+                                        "Actual Category": str(y_test.iloc[i]),
+                                        "Match": "✅" if pred == y_test.iloc[i] else "❌",
+                                    }
+                                )
+                            else:
+                                samples.append(
+                                    {
+                                        "Case": f"Patient {i+1}",
+                                        "Predicted LOS": f"{float(pred):.1f} days",
+                                        "Actual LOS": f"{float(y_test.iloc[i]):.1f} days",
+                                        "Difference": f"{abs(float(pred) - float(y_test.iloc[i])):.1f} days",
+                                    }
+                                )
+                        st.dataframe(pd.DataFrame(samples), use_container_width=True)
+
+                        with st.expander("💻 View Implementation Code (LOS)"):
+                            target_for_snippet = "los_category" if is_classification else "length_of_stay"
+                            code = generate_python_code(best_model_name, selected_features, target_for_snippet)
+                            st.code(code, language="python")
+                    else:
+                        st.error("All models failed to train. Check feature selection and data quality.")
+            else:
+                st.warning("Please select at least one feature for model training.")
+
+        # Persistent business insights for LOS
+        if "los" in st.session_state.model_results and st.session_state.model_results["los"]:
+            st.markdown("---")
+            st.markdown("## 📋 Business Insights")
+            los_results = st.session_state.model_results["los"]
+            is_cls = bool(st.session_state.get("los_is_classification", False))
+            if is_cls:
+                best_model = max(los_results.keys(), key=lambda x: los_results[x].get("accuracy", 0))
+                perf = los_results[best_model]["accuracy"]
+            else:
+                best_model = max(los_results.keys(), key=lambda x: los_results[x].get("r2_score", -np.inf))
+                perf = los_results[best_model]["r2_score"]
+            data_summary = {
+                "prediction_type": st.session_state.get("los_target_type", "Unknown"),
+                "best_model": best_model,
+                "performance_metric": float(perf),
+                "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
+                "total_patients": len(filtered_df),
+            }
+            insights = generate_business_summary("Length of Stay Prediction", data_summary, los_results)
+            st.markdown(f'<div class="insights-panel">{insights}</div>', unsafe_allow_html=True)
+
+# ===================== TAB 4: Operational KPIs & Simulator =====================
+with tabs[3]:
+    st.markdown("""
+    <div class="analysis-section">
+        <h3>📊 Operational KPIs & What-If Staffing</h3>
+        <p>Concise metrics leadership cares about + a quick scenario sandbox.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        total_enc = len(filtered_df)
+        st.metric("Encounters (filtered)", f"{total_enc:,}")
+    with k2:
+        if "billing_amount" in filtered_df.columns:
+            rev = float(filtered_df["billing_amount"].sum())
+            st.metric("Revenue (filtered)", f"${rev:,.0f}")
+    with k3:
+        if "length_of_stay" in filtered_df.columns:
+            st.metric("Avg LOS", f"{filtered_df['length_of_stay'].mean():.1f} days")
+    with k4:
+        if "medical_condition" in filtered_df.columns and len(filtered_df):
+            top_cond = filtered_df["medical_condition"].value_counts().idxmax()
+            st.metric("Top Condition", str(top_cond))
+
+    # Pareto of revenue by payer
+    if {"insurance_provider","billing_amount"}.issubset(filtered_df.columns) and len(filtered_df):
+        payer_rev = (
+            filtered_df.groupby("insurance_provider")["billing_amount"]
+            .sum().sort_values(ascending=False).reset_index()
+        )
+        figp = px.bar(payer_rev, x="insurance_provider", y="billing_amount", title="Revenue by Payer (Pareto)")
+        figp.update_layout(height=380, xaxis_title="Payer", yaxis_title="Revenue ($)")
+        st.plotly_chart(figp, use_container_width=True)
+
+    st.markdown('<div class="config-row"><h4>🧪 What-If: Staffing vs. Admissions</h4></div>', unsafe_allow_html=True)
+    w1, w2, w3 = st.columns(3)
+    with w1:
+        pts_per_day_nurse = st.number_input("Patients per Day Nurse", min_value=4, max_value=12, value=8)
+    with w2:
+        pts_per_night_nurse = st.number_input("Patients per Night Nurse", min_value=6, max_value=18, value=12)
+    with w3:
+        surge_pct = st.slider("Potential Surge (%)", 0, 50, 15, 5)
+
+    # use recent admissions mean (last 28 days if possible)
+    daily_adm_local = filtered_df.groupby(filtered_df["date_of_admission"].dt.date).size().reset_index()
+    daily_adm_local.columns = ["date","admissions"]
+    recent_mean = float(daily_adm_local["admissions"].tail(28).mean()) if len(daily_adm_local) else 0.0
+    target_load = recent_mean * (1 + surge_pct/100.0)
+
+    d1, d2, d3 = st.columns(3)
+    with d1:
+        dn = int(np.ceil(target_load / max(1, pts_per_day_nurse)))
+        st.metric("Needed Day Nurses", f"{dn}")
+    with d2:
+        nn = int(np.ceil(target_load / max(1, pts_per_night_nurse)))
+        st.metric("Needed Night Nurses", f"{nn}")
+    with d3:
+        est_cost = dn*350 + nn*400
+        st.metric("Est. Daily Cost", f"${est_cost:,.0f}")
+
+    with st.expander("💻 View Implementation Code (Simulator)"):
+        sim_code = f'''
+import numpy as np
+
+recent_mean = {recent_mean:.2f}
+surge = {surge_pct}/100.0
+pts_per_day_nurse = {pts_per_day_nurse}
+pts_per_night_nurse = {pts_per_night_nurse}
+
+target_load = recent_mean * (1 + surge)
+day_nurses = int(np.ceil(target_load / max(1, pts_per_day_nurse)))
+night_nurses = int(np.ceil(target_load / max(1, pts_per_night_nurse)))
+daily_cost = day_nurses*350 + night_nurses*400
+
+print("Target Admissions:", round(target_load,1))
+print("Day Nurses:", day_nurses, "Night Nurses:", night_nurses, "Daily Cost: $", daily_cost)
+'''
+        st.code(sim_code, language="python")
+
+# ===================== Decision Log =====================
+st.markdown("---")
+st.markdown("## 📋 Decision Tracking")
+with st.expander("📝 Add New Decision", expanded=False):
+    d1, d2 = st.columns(2)
+    with d1:
+        decision_section = st.selectbox(
+            "Analysis Section",
+            ["Admissions Forecasting", "Revenue Analytics", "Length of Stay Prediction", "Operational KPIs & Simulator"]
+        )
+        decision_action = st.selectbox(
+            "Decision",
+            ["Approve for Production", "Needs Review", "Requires Additional Data", "Reject"]
+        )
+    with d2:
+        decision_owner = st.text_input("Responsible Person")
+        decision_date = st.date_input("Target Date")
+    decision_notes = st.text_area("Notes and Comments")
+    if st.button("Add Decision", type="secondary"):
+        new_decision = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "section": decision_section,
+            "action": decision_action,
+            "owner": decision_owner,
+            "target_date": decision_date.strftime("%Y-%m-%d"),
+            "notes": decision_notes,
+        }
+        st.session_state.decision_log.append(new_decision)
+        st.success("✅ Decision added to tracking log!")
+
+if st.session_state.decision_log:
+    st.subheader("Decision History")
+    decisions_df = pd.DataFrame(st.session_state.decision_log)
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        st.dataframe(decisions_df, use_container_width=True)
+    with c2:
+        if "action" in decisions_df.columns:
+            approved = int((decisions_df["action"] == "Approve for Production").sum())
+            pending = int((decisions_df["action"] == "Needs Review").sum())
+            st.metric("Approved", approved)
+            st.metric("Pending Review", pending)
+    with c3:
+        csv = decisions_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Log",
+            data=csv,
+            file_name=f"decisions_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            type="secondary",
+        )
+
+# ---------- Footer ----------
+st.markdown("---")
+st.markdown(
+    """
+<div style="text-align:center;color:#666;padding:2rem;">
+    <p>Hospital Operations Analytics Platform • Built with Streamlit & Python ML Libraries</p>
+    <p>For questions or support, contact your analytics team</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
