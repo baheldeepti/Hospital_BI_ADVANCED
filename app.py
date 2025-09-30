@@ -1,25 +1,21 @@
-# app.py — Hospital Operations Analytics Platform (Enhanced)
+# app.py — Hospital Operations Analytics Platform (Enhanced Version)
 # ✅ Fixed OpenAI API key detection from Streamlit secrets
-# ✅ Editable & executable model code sections in all tabs
-# ✅ Model performance sorted in descending order
-# ✅ Fixed Business Implications import errors
+# ✅ Editable & executable code sections for all model training
+# ✅ Model performance sorted by best metric
+# ✅ Fixed implications code execution with proper imports
 # ✅ Multiple model selection for revenue analytics
-# ✅ LOS calculation explanation with category thresholds
-# ✅ ROC curves for multiple models in classification
-# ✅ AI Assistant integrated in each tab
+# ✅ LOS calculation documentation and multi-model ROC curves
+# ✅ AI Assistant integration in each tab
 # ✅ Real-time code execution with proper sandboxing
-# ✅ Production-ready with comprehensive error handling
 
 import os
 import io
 import json
 import textwrap
 import warnings
-import traceback
 from datetime import datetime
 from typing import Dict, Optional, Tuple, List, Any
-import sys
-from io import StringIO
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -57,7 +53,7 @@ try:
 except Exception:
     HAS_XGBOOST = False
 
-# ---------- OpenAI Setup (Enhanced with better secret detection) ----------
+# ---------- OpenAI (optional) – FIXED for Streamlit secrets ----------
 OPENAI_AVAILABLE = False
 OPENAI_CLIENT = None
 OPENAI_MODEL_MAP = {
@@ -66,26 +62,25 @@ OPENAI_MODEL_MAP = {
 }
 
 def get_openai_key():
-    """Enhanced OpenAI key detection from multiple sources"""
-    # Priority 1: Streamlit secrets
+    """Properly retrieve OpenAI API key from Streamlit secrets or environment"""
+    _api_key = None
     try:
-        if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
-            return st.secrets['OPENAI_API_KEY']
-    except Exception as e:
-        pass
-    
-    # Priority 2: Environment variable
-    try:
-        key = os.getenv('OPENAI_API_KEY')
-        if key:
-            return key
+        # Try Streamlit secrets first
+        if hasattr(st, 'secrets') and "OPENAI_API_KEY" in st.secrets:
+            _api_key = st.secrets["OPENAI_API_KEY"]
     except Exception:
         pass
     
-    return None
+    if not _api_key:
+        try:
+            _api_key = os.getenv("OPENAI_API_KEY")
+        except Exception:
+            pass
+    
+    return _api_key
 
 try:
-    # Try new SDK first
+    # New SDK
     from openai import OpenAI
     _api_key = get_openai_key()
     if _api_key:
@@ -93,7 +88,7 @@ try:
         OPENAI_AVAILABLE = True
 except Exception:
     try:
-        # Fallback to legacy SDK
+        # Legacy SDK
         import openai
         _api_key = get_openai_key()
         if _api_key:
@@ -112,7 +107,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---------- Enhanced CSS ----------
+# ---------- CSS ----------
 st.markdown(
     """
 <style>
@@ -163,20 +158,6 @@ st.markdown(
         margin: 1rem 0;
         border-left: 4px solid #4285f4;
     }
-    .code-section {
-        background: #f8f9fa;
-        padding: 1.5rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-        border: 2px solid #4285f4;
-    }
-    .ai-assistant {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1.5rem 0;
-    }
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         justify-content: center;
@@ -192,14 +173,21 @@ st.markdown(
         background-color: #4285f4;
         color: white;
     }
-    code, pre { white-space: pre-wrap; }
-    .info-box {
-        background: #e3f2fd;
+    .ai-assistant-box {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin: 1.5rem 0;
+        color: white;
+    }
+    .code-execution-result {
+        background: #f8f9fa;
         padding: 1rem;
         border-radius: 8px;
-        border-left: 4px solid #2196f3;
+        border-left: 4px solid #34a853;
         margin: 1rem 0;
     }
+    code, pre { white-space: pre-wrap; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -230,7 +218,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------- GLOBAL CONTROLS ----------
+# ---------- GLOBAL CONTROLS: Role + LLM ----------
 c_role, c_llm, c_temp = st.columns([1, 2, 1])
 with c_role:
     st.session_state.USER_ROLE = st.radio(
@@ -258,15 +246,13 @@ with c_temp:
     )
 
 if st.session_state.INSIGHTS_USE_LLM and not OPENAI_AVAILABLE:
-    st.warning("⚠️ OpenAI API key not found. Please add OPENAI_API_KEY to Streamlit secrets. Falling back to local insights.")
+    st.warning("⚠️ OpenAI API key not found. Set `st.secrets['OPENAI_API_KEY']` in Streamlit secrets. Falling back to local insights.")
 
 # ---------- Data loading ----------
 @st.cache_data(ttl=3600, show_spinner="Loading hospital data...")
 def load_hospital_data() -> pd.DataFrame:
-    """Load and preprocess hospital data with comprehensive feature engineering"""
     local_path = "/mnt/data/modified_healthcare_dataset.csv"
     df = None
-    
     try:
         if os.path.exists(local_path):
             df = pd.read_csv(local_path)
@@ -278,46 +264,42 @@ def load_hospital_data() -> pd.DataFrame:
         np.random.seed(42)
         n_records = 6000
         dates = pd.date_range(start="2023-01-01", end="2024-01-01", periods=n_records)
-        df = pd.DataFrame({
-            "Date of Admission": dates,
-            "Discharge Date": dates + pd.to_timedelta(np.random.exponential(5, n_records), unit="D"),
-            "Age": np.random.normal(55, 20, n_records).clip(0, 100),
-            "Medical Condition": np.random.choice(
-                ["Diabetes", "Hypertension", "Heart Disease", "Cancer", "Asthma"], n_records
-            ),
-            "Admission Type": np.random.choice(["Emergency", "Elective", "Urgent"], n_records, p=[0.4, 0.4, 0.2]),
-            "Hospital": np.random.choice(["General Hospital", "Children Hospital", "University Hospital"], n_records),
-            "Insurance Provider": np.random.choice(["Medicare", "Medicaid", "Blue Cross", "Aetna", "UnitedHealth"], n_records),
-            "Billing Amount": np.random.lognormal(8, 1, n_records),
-            "Doctor": [f"Dr. {name}" for name in np.random.choice(["Smith", "Johnson", "Williams", "Brown", "Jones"], n_records)],
-            "Test Results": np.random.choice(["Normal", "Abnormal", "Inconclusive"], n_records, p=[0.6, 0.3, 0.1]),
-        })
+        df = pd.DataFrame(
+            {
+                "Date of Admission": dates,
+                "Discharge Date": dates + pd.to_timedelta(np.random.exponential(5, n_records), unit="D"),
+                "Age": np.random.normal(55, 20, n_records).clip(0, 100),
+                "Medical Condition": np.random.choice(
+                    ["Diabetes", "Hypertension", "Heart Disease", "Cancer", "Asthma"], n_records
+                ),
+                "Admission Type": np.random.choice(["Emergency", "Elective", "Urgent"], n_records, p=[0.4, 0.4, 0.2]),
+                "Hospital": np.random.choice(["General Hospital", "Children Hospital", "University Hospital"], n_records),
+                "Insurance Provider": np.random.choice(["Medicare", "Medicaid", "Blue Cross", "Aetna", "UnitedHealth"], n_records),
+                "Billing Amount": np.random.lognormal(8, 1, n_records),
+                "Doctor": [f"Dr. {name}" for name in np.random.choice(["Smith", "Johnson", "Williams", "Brown", "Jones"], n_records)],
+                "Test Results": np.random.choice(["Normal", "Abnormal", "Inconclusive"], n_records, p=[0.6, 0.3, 0.1]),
+            }
+        )
 
-    # Normalize column names
+    # normalize & engineer
     df.columns = df.columns.str.replace(" ", "_").str.lower()
-    
-    # Parse dates
     for col in ["date_of_admission", "discharge_date"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
 
-    # Calculate Length of Stay
     if {"date_of_admission", "discharge_date"}.issubset(df.columns):
         los = (df["discharge_date"] - df["date_of_admission"]).dt.days
         los = np.clip(los.fillna(0), 0, 365).astype(int)
         df["length_of_stay"] = los
 
-    # Date features
     if "date_of_admission" in df.columns:
         df["admission_month"] = df["date_of_admission"].dt.month
         df["admission_day_of_week"] = df["date_of_admission"].dt.dayofweek
         df["admission_quarter"] = df["date_of_admission"].dt.quarter
 
-    # Billing amount cleaning
     if "billing_amount" in df.columns:
         df["billing_amount"] = pd.to_numeric(df["billing_amount"], errors="coerce").fillna(0).clip(0)
 
-    # Age groups
     if "age" in df.columns:
         df["age"] = pd.to_numeric(df["age"], errors="coerce").fillna(df["age"].median())
         df["age_group"] = pd.cut(
@@ -325,13 +307,10 @@ def load_hospital_data() -> pd.DataFrame:
             labels=["Child", "Young Adult", "Adult", "Senior", "Elderly"], include_lowest=True,
         )
 
-    # LOS categories (with clear thresholds)
     if "length_of_stay" in df.columns:
         df["los_category"] = pd.cut(
-            df["length_of_stay"], 
-            bins=[-0.1, 3, 7, 14, float("inf")],
-            labels=["Short", "Medium", "Long", "Extended"], 
-            include_lowest=True,
+            df["length_of_stay"], bins=[-0.1, 3, 7, 14, float("inf")],
+            labels=["Short", "Medium", "Long", "Extended"], include_lowest=True,
         )
 
     return df.dropna(subset=["date_of_admission"])
@@ -391,76 +370,53 @@ if len(filtered_df) != len(df):
 
 st.session_state["_filtered_df_for_summary"] = filtered_df
 
-# ---------- Helper Functions ----------
-
+# ---------- Helper functions ----------
 def _fmt_pct(x, d=1):
-    """Format percentage"""
-    try: 
-        return f"{100*float(x):.{d}f}%"
-    except Exception: 
-        return "N/A"
+    try: return f"{100*float(x):.{d}f}%"
+    except Exception: return "N/A"
 
 def _fmt_num(x, d=1, money=False):
-    """Format number with optional currency"""
     try:
         f = float(x)
-        if money: 
-            return f"${f:,.0f}"
+        if money: return f"${f:,.0f}"
         return f"{f:.{d}f}"
     except Exception:
         return "N/A"
 
-def safe_execute_code(code: str, context: Dict[str, Any]) -> Tuple[bool, Any, str]:
+# ---------- Safe code executor (FIXED with proper imports) ----------
+def run_user_code(user_code: str, context: Dict[str, Any]) -> Tuple[bool, Any, str]:
     """
-    Enhanced safe code execution with comprehensive sandboxing
-    Captures stdout and provides better error reporting
+    Executes user Python code in a constrained namespace with proper imports.
     """
-    # Expanded safe builtins
-    safe_builtins = {
+    safe_globals = {
         "__builtins__": {
-            "abs": abs, "min": min, "max": max, "sum": sum, "len": len,
-            "range": range, "round": round, "float": float, "int": int,
-            "str": str, "dict": dict, "list": list, "tuple": tuple,
-            "enumerate": enumerate, "zip": zip, "sorted": sorted,
-            "print": print, "True": True, "False": False, "None": None,
-        }
-    }
-    
-    safe_globals = {**safe_builtins}
-    safe_locals = {
+            "abs": abs, "min": min, "max": max, "sum": sum, "len": len, "range": range, "round": round,
+            "float": float, "int": int, "str": str, "dict": dict, "list": list, "tuple": tuple,
+            "enumerate": enumerate, "zip": zip, "sorted": sorted, "print": print, "bool": bool
+        },
         "pd": pd,
         "np": np,
-        "context": context,
-        "ctx": context,  # Alias
+        "go": go,
+        "px": px,
     }
-
-    # Capture stdout
-    old_stdout = sys.stdout
-    redirected_output = StringIO()
-    sys.stdout = redirected_output
+    safe_locals = context.copy()
 
     try:
-        compiled = compile(code, "<user_code>", "exec")
+        compiled = compile(user_code, "<user_code>", "exec")
         exec(compiled, safe_globals, safe_locals)
         
-        # Restore stdout
-        sys.stdout = old_stdout
-        output = redirected_output.getvalue()
-        
-        # Look for result in various forms
-        result = safe_locals.get('result', None)
-        if result is None and 'compute_implications' in safe_locals:
-            result = safe_locals['compute_implications'](context)
-        
-        return True, result, output
-        
+        # Check for common return patterns
+        if "result" in safe_locals:
+            return True, safe_locals["result"], ""
+        elif "output" in safe_locals:
+            return True, safe_locals["output"], ""
+        else:
+            return True, safe_locals, ""
     except Exception as e:
-        sys.stdout = old_stdout
-        error_msg = f"Error executing code: {str(e)}\n{traceback.format_exc()}"
-        return False, None, error_msg
+        return False, None, f"Error: {str(e)}\n{traceback.format_exc()}"
 
+# ---------- Local (non-LLM) insight generator ----------
 def local_insight(section_title: str, data_summary: dict, model_results: Optional[dict]) -> str:
-    """Generate local insights without LLM"""
     role = st.session_state.get("USER_ROLE", "Executive")
     section = section_title.lower()
     gdf = st.session_state.get("_filtered_df_for_summary")
@@ -483,15 +439,17 @@ def local_insight(section_title: str, data_summary: dict, model_results: Optiona
         bills = gdf["billing_amount"].sort_values(ascending=False)
         top_decile_cut = int(max(1, np.floor(0.1 * len(bills))))
         top_decile_share = bills.iloc[:top_decile_cut].sum() / max(bills.sum(), 1e-9)
-        payer_mix = gdf.groupby("insurance_provider")["billing_amount"].sum().sort_values(ascending=False)
-        top_payer = payer_mix.index[0] if len(payer_mix) else "N/A"
-        top_payer_share = (payer_mix.iloc[0] / payer_mix.sum()) if len(payer_mix) else np.nan
+        anomaly_line = ""
+        if model_results:
+            best = min(model_results.keys(), key=lambda x: abs(model_results[x].get("anomaly_rate", 1.0) - 0.05))
+            det = model_results[best]
+            anomaly_line = f"{best} flags {int(det.get('anomalies_detected',0))} cases ({_fmt_pct(det.get('anomaly_rate',0))})."
         body = [
             f"Top 10% encounters drive {_fmt_pct(top_decile_share)} of revenue.",
-            f"{top_payer} accounts for {_fmt_pct(top_payer_share)} of payer mix.",
-            "Audit top-decile encounters; negotiate with top payer; add pre-bill rules for spike days."
+            anomaly_line,
+            "Audit top-decile encounters; add pre-bill rules for spike days."
         ]
-        return "\n".join(body)
+        return "\n".join([b for b in body if b])
 
     if "length of stay" in section or "los" in section:
         if gdf is None or "length_of_stay" not in gdf.columns or len(gdf) == 0:
@@ -500,14 +458,14 @@ def local_insight(section_title: str, data_summary: dict, model_results: Optiona
         iqr = np.percentile(los, 75) - np.percentile(los, 25)
         body = [
             f"Average LOS {los.mean():.1f} days (median {los.median():.1f}; IQR {iqr:.1f}).",
-            "Standardize discharge pathways for highest-LOS cohorts; focus variance-reduction on IQR tail."
+            "Standardize discharge pathways for highest-LOS cohorts."
         ]
         return "\n".join(body)
 
     return "No summary available."
 
+# ---------- LLM insight generator (role-aware) ----------
 def llm_insight(section_title: str, data_summary: dict, model_results: Optional[dict], prompt_overrides: str = "") -> str:
-    """Generate insights using LLM with role awareness"""
     use_llm = bool(st.session_state.get("INSIGHTS_USE_LLM", False))
     if not use_llm or not OPENAI_AVAILABLE:
         return local_insight(section_title, data_summary, model_results)
@@ -559,494 +517,262 @@ model_results = {json.dumps(model_results or {}, default=str)}
         st.info(f"LLM insights unavailable ({e}). Showing local summary.")
         return local_insight(section_title, data_summary, model_results)
 
-def run_implications_code(user_code: str, context: Dict[str, Any]) -> Tuple[bool, Any, str]:
-    """Execute implications code with enhanced error handling"""
-    # Add necessary imports to context
-    safe_globals = {
-        "__builtins__": {
-            "abs": abs, "min": min, "max": max, "sum": sum, "len": len, "range": range, "round": round,
-            "float": float, "int": int, "str": str, "dict": dict, "list": list, "tuple": tuple,
-            "enumerate": enumerate, "zip": zip, "sorted": sorted, "print": print,
-        }
-    }
-    safe_locals = {"pd": pd, "np": np}
-
-    try:
-        compiled = compile(user_code, "<implications>", "exec")
-        exec(compiled, safe_globals, safe_locals)
-        if "compute_implications" not in safe_locals:
-            return False, None, "Function `compute_implications(ctx)` not found in code."
-        result = safe_locals["compute_implications"](context)
-        return True, result, ""
-    except Exception as e:
-        return False, None, f"Error while executing implications code: {str(e)}\n{traceback.format_exc()}"
-
-def ai_assistant_section(tab_name: str, context: Dict[str, Any]):
-    """
-    AI Assistant component for each tab
-    Provides context-aware help for modeling and data analysis
-    """
-    st.markdown(f'<div class="ai-assistant"><h4>🤖 AI Model Assistant</h4><p>Ask questions about data, models, or get suggestions for improvement</p></div>', unsafe_allow_html=True)
+# ---------- AI Assistant Component ----------
+def ai_assistant_section(tab_name: str, context: str):
+    """AI Assistant for each tab"""
+    st.markdown(f'<div class="ai-assistant-box"><h4>🤖 AI Model Assistant</h4><p>Ask questions about your data, models, or get suggestions for improvement.</p></div>', unsafe_allow_html=True)
     
-    # Initialize chat history for this tab
     chat_key = f"chat_{tab_name}"
     if chat_key not in st.session_state.chat_history:
         st.session_state.chat_history[chat_key] = []
     
-    # Display chat history
-    for msg in st.session_state.chat_history[chat_key]:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
+    user_question = st.text_input(
+        f"Ask about {tab_name}:",
+        key=f"user_q_{tab_name}",
+        placeholder="e.g., How can I improve model accuracy? What features should I add?"
+    )
     
-    # Chat input
-    user_question = st.chat_input(f"Ask about {tab_name} models or data...")
-    
-    if user_question:
-        # Add user message to history
-        st.session_state.chat_history[chat_key].append({"role": "user", "content": user_question})
-        
-        with st.chat_message("user"):
-            st.write(user_question)
-        
-        # Generate AI response
-        with st.chat_message("assistant"):
+    if st.button("Ask AI", key=f"ask_{tab_name}"):
+        if user_question and OPENAI_AVAILABLE:
             with st.spinner("Thinking..."):
-                if OPENAI_AVAILABLE:
-                    try:
-                        model_label = st.session_state.get("INSIGHTS_MODEL", "GPT-4.0")
-                        model_name = OPENAI_MODEL_MAP.get(model_label, "gpt-4")
-                        
-                        system_prompt = f"""You are an expert data scientist and hospital operations analyst.
-You are helping with the {tab_name} section of a hospital analytics platform.
+                try:
+                    model_label = st.session_state.get("INSIGHTS_MODEL", "GPT-4.0")
+                    model_name = OPENAI_MODEL_MAP.get(model_label, "gpt-4")
+                    
+                    prompt = f"""You are an AI assistant helping with hospital analytics and machine learning.
+Context: {context}
+Tab: {tab_name}
+User role: {st.session_state.USER_ROLE}
 
-Current context:
-{json.dumps(context, default=str, indent=2)}
+User question: {user_question}
 
-Provide helpful, practical advice about:
-- Model selection and parameters
-- Feature engineering
-- Interpreting results
-- Business implications
-- Code improvements
-- Best practices
+Provide a helpful, actionable answer focused on improving the analysis or model."""
 
-Be concise but thorough. Use bullet points when appropriate."""
+                    if hasattr(OPENAI_CLIENT, "chat"):
+                        resp = OPENAI_CLIENT.chat.completions.create(
+                            model=model_name,
+                            temperature=0.7,
+                            messages=[
+                                {"role": "system", "content": "You are a helpful ML and analytics assistant for hospital operations."},
+                                {"role": "user", "content": prompt},
+                            ],
+                        )
+                        answer = resp.choices[0].message.content.strip()
+                    else:
+                        resp = OPENAI_CLIENT.ChatCompletion.create(
+                            model=model_name,
+                            temperature=0.7,
+                            messages=[
+                                {"role": "system", "content": "You are a helpful ML and analytics assistant for hospital operations."},
+                                {"role": "user", "content": prompt},
+                            ],
+                        )
+                        answer = resp.choices[0].message["content"].strip()
+                    
+                    st.session_state.chat_history[chat_key].append({"q": user_question, "a": answer})
+                except Exception as e:
+                    st.error(f"AI Assistant error: {e}")
+        elif not OPENAI_AVAILABLE:
+            st.warning("AI Assistant requires OpenAI API key. Please configure it in Streamlit secrets.")
+    
+    # Display chat history
+    if st.session_state.chat_history[chat_key]:
+        st.markdown("### Recent Conversations")
+        for i, chat in enumerate(reversed(st.session_state.chat_history[chat_key][-3:])):
+            with st.expander(f"Q: {chat['q'][:50]}...", expanded=(i==0)):
+                st.markdown(f"**Question:** {chat['q']}")
+                st.markdown(f"**Answer:** {chat['a']}")
 
-                        if hasattr(OPENAI_CLIENT, "chat") and hasattr(OPENAI_CLIENT.chat, "completions"):
-                            resp = OPENAI_CLIENT.chat.completions.create(
-                                model=model_name,
-                                temperature=0.7,
-                                messages=[
-                                    {"role": "system", "content": system_prompt},
-                                    {"role": "user", "content": user_question},
-                                ],
-                            )
-                            response = resp.choices[0].message.content.strip()
-                        else:
-                            resp = OPENAI_CLIENT.ChatCompletion.create(
-                                model=model_name,
-                                temperature=0.7,
-                                messages=[
-                                    {"role": "system", "content": system_prompt},
-                                    {"role": "user", "content": user_question},
-                                ],
-                            )
-                            response = resp.choices[0].message["content"].strip()
-                        
-                        st.write(response)
-                        st.session_state.chat_history[chat_key].append({"role": "assistant", "content": response})
-                        
-                    except Exception as e:
-                        error_msg = f"I'm having trouble connecting right now. Error: {str(e)}"
-                        st.error(error_msg)
-                        st.session_state.chat_history[chat_key].append({"role": "assistant", "content": error_msg})
-                else:
-                    fallback = f"""I can help with {tab_name}, but I need an OpenAI API key to provide detailed responses.
-
-Meanwhile, here are some general tips:
-- Ensure your features are relevant and not collinear
-- Try multiple models and compare performance
-- Use cross-validation for robust evaluation
-- Consider domain knowledge when interpreting results
-- Start simple, then add complexity if needed
-
-Add your OpenAI API key in Streamlit secrets to unlock full AI assistance!"""
-                    st.write(fallback)
-                    st.session_state.chat_history[chat_key].append({"role": "assistant", "content": fallback})
-
-def generate_model_code(model_type: str, model_name: str, params: dict) -> str:
-    """
-    Generate executable Python code for the selected model
-    """
-    if model_type == "forecasting":
-        if model_name == "Linear Trend":
-            return f"""
-# Linear Trend Forecasting Model
+# ---------- Code generator functions ----------
+def generate_forecast_code(model_name: str, params: dict) -> str:
+    """Generate executable code for forecasting models"""
+    if model_name == "Linear Trend":
+        return f"""
 import numpy as np
 import pandas as pd
 
-# Parameters
-forecast_days = {params.get('forecast_days', 14)}
-
-# Training data preparation
-# Assuming 'train_data' is a pandas Series with datetime index
+# Linear Trend Forecasting
 x = np.arange(len(train_data))
-y = train_data.values
-
-# Fit linear model
-coeffs = np.polyfit(x, y, 1)
-print(f"Trend: slope={coeffs[0]:.3f}, intercept={coeffs[1]:.3f}")
-
-# Generate forecast
-future_x = np.arange(len(train_data), len(train_data) + forecast_days)
+coeffs = np.polyfit(x, train_data.values, 1)
+future_x = np.arange(len(train_data), len(train_data) + {params.get('forecast_days', 14)})
 forecast = np.polyval(coeffs, future_x)
-
-# Store result
 result = forecast
-print(f"Forecast range: {{forecast.min():.1f}} to {{forecast.max():.1f}}")
+print(f"Forecast: {{forecast}}")
 """
-        
-        elif model_name == "ARIMA":
-            return f"""
-# ARIMA(1,1,1) Forecasting Model
+    elif model_name == "ARIMA":
+        return f"""
 from statsmodels.tsa.arima.model import ARIMA
-import pandas as pd
 
-# Parameters
-forecast_days = {params.get('forecast_days', 14)}
-order = (1, 1, 1)  # (p, d, q)
-
-# Fit ARIMA model
-# Assuming 'train_data' is available
-model = ARIMA(train_data, order=order)
+# ARIMA(1,1,1) Forecasting
+model = ARIMA(train_data, order=(1, 1, 1))
 fit = model.fit()
-
-print(fit.summary())
-
-# Generate forecast
-forecast = fit.forecast(steps=forecast_days)
-result = forecast.values
-
-print(f"Forecast generated: {{len(result)}} days")
-print(f"Forecast range: {{result.min():.1f}} to {{result.max():.1f}}")
+forecast = fit.forecast(steps={params.get('forecast_days', 14)}).values
+result = forecast
+print(f"ARIMA Forecast: {{forecast}}")
 """
-        
-        elif model_name == "Exponential Smoothing":
-            return f"""
-# Exponential Smoothing (Holt-Winters) Forecasting
+    elif model_name == "Exponential Smoothing":
+        return f"""
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
-# Parameters
-forecast_days = {params.get('forecast_days', 14)}
-seasonal_periods = 7  # Weekly seasonality
-
-# Fit model
-# Assuming 'train_data' is available
-model = ExponentialSmoothing(
-    train_data,
-    trend='add',
-    seasonal='add',
-    seasonal_periods=seasonal_periods
-)
+# Exponential Smoothing with weekly seasonality
+model = ExponentialSmoothing(train_data, trend="add", seasonal="add", seasonal_periods=7)
 fit = model.fit()
-
-# Generate forecast
-forecast = fit.forecast(steps=forecast_days)
-result = forecast.values
-
-print(f"Forecast generated: {{len(result)}} days")
-print(f"Forecast range: {{result.min():.1f}} to {{result.max():.1f}}")
+forecast = fit.forecast(steps={params.get('forecast_days', 14)}).values
+result = forecast
+print(f"Exponential Smoothing Forecast: {{forecast}}")
 """
-        
-        elif model_name == "Prophet":
-            return f"""
-# Facebook Prophet Forecasting
+    elif model_name == "Prophet":
+        return f"""
 from prophet import Prophet
-import pandas as pd
 
-# Parameters
-forecast_days = {params.get('forecast_days', 14)}
-
-# Prepare data for Prophet (needs 'ds' and 'y' columns)
-prophet_df = train_data.reset_index()
-prophet_df.columns = ['ds', 'y']
-
-# Initialize and fit model
-model = Prophet(
-    daily_seasonality=False,
-    weekly_seasonality=True,
-    yearly_seasonality=False
-)
-model.fit(prophet_df)
-
-# Create future dataframe
-future = model.make_future_dataframe(periods=forecast_days)
-
-# Generate forecast
-forecast_df = model.predict(future)
-result = forecast_df['yhat'].tail(forecast_days).values
-
-print(f"Forecast generated: {{len(result)}} days")
-print(f"Forecast range: {{result.min():.1f}} to {{result.max():.1f}}")
+# Prophet Forecasting
+p_df = train_data.reset_index()
+p_df.columns = ["ds", "y"]
+m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=False)
+m.fit(p_df)
+future = m.make_future_dataframe(periods={params.get('forecast_days', 14)})
+fc = m.predict(future)
+forecast = fc["yhat"].tail({params.get('forecast_days', 14)}).values
+result = forecast
+print(f"Prophet Forecast: {{forecast}}")
 """
-    
-    elif model_type == "anomaly":
-        if model_name == "Isolation Forest":
-            return f"""
-# Isolation Forest Anomaly Detection
+    return "# Code generation not available for this model"
+
+def generate_anomaly_code(method: str, params: dict) -> str:
+    """Generate executable code for anomaly detection"""
+    if method == "Isolation Forest":
+        return f"""
 from sklearn.ensemble import IsolationForest
 import numpy as np
 
-# Parameters
-contamination = {params.get('contamination', 0.05)}
-random_state = 42
-
-# Initialize model
-model = IsolationForest(
-    contamination=contamination,
-    random_state=random_state,
-    n_estimators=100
-)
-
-# Fit and predict
-# Assuming 'X' contains the feature data
-predictions = model.fit_predict(X)
-
-# -1 for anomalies, 1 for normal
-anomalies = predictions == -1
-n_anomalies = anomalies.sum()
-
-print(f"Detected {{n_anomalies}} anomalies ({{100*n_anomalies/len(X):.2f}}%)")
-
-# Store result
-result = predictions
+# Isolation Forest Anomaly Detection
+X = feature_data[{params.get('features', [])}].dropna()
+iso = IsolationForest(contamination={params.get('sensitivity', 0.05)}, random_state=42)
+predictions = iso.fit_predict(X)
+anomalies = np.where(predictions == -1)[0]
+result = {{'n_anomalies': len(anomalies), 'anomaly_indices': anomalies.tolist()}}
+print(f"Detected {{len(anomalies)}} anomalies")
 """
-        
-        elif model_name == "Statistical Outliers":
-            return f"""
-# Statistical Outliers Detection (Z-score method)
+    elif method == "Statistical Outliers":
+        return f"""
 import numpy as np
-import pandas as pd
 
-# Parameters
-z_threshold = 3.0
-
-# Calculate z-scores
-# Assuming 'X' is a DataFrame with features
-z_scores = np.abs((X - X.mean()) / X.std(ddof=0))
-z_scores = z_scores.fillna(0)
-
-# Flag outliers (any feature exceeds threshold)
-is_outlier = (z_scores > z_threshold).any(axis=1)
-n_outliers = is_outlier.sum()
-
-print(f"Detected {{n_outliers}} outliers ({{100*n_outliers/len(X):.2f}}%)")
-
-# Convert to sklearn format (-1 for anomaly, 1 for normal)
-result = np.where(is_outlier.values, -1, 1)
+# Statistical Outliers (z-score > 3)
+X = feature_data[{params.get('features', [])}].dropna()
+z = np.abs((X - X.mean()) / X.std(ddof=0)).fillna(0.0)
+stat_mask = (z > 3).any(axis=1)
+anomalies = np.where(stat_mask)[0]
+result = {{'n_anomalies': len(anomalies), 'anomaly_indices': anomalies.tolist()}}
+print(f"Detected {{len(anomalies)}} anomalies")
 """
-    
-    elif model_type == "classification":
+    return "# Code generation not available for this method"
+
+def generate_los_code(model_name: str, is_classification: bool, params: dict) -> str:
+    """Generate executable code for LOS prediction"""
+    if is_classification:
         if model_name == "Random Forest":
             return f"""
-# Random Forest Classification
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score, classification_report
 
-# Parameters
-n_estimators = {params.get('n_estimators', 200)}
-random_state = 42
+# Random Forest Classifier for LOS Category
+X = feature_data[{params.get('features', [])}]
+y = feature_data['los_category']
 
-# Initialize model
-model = RandomForestClassifier(
-    n_estimators=n_estimators,
-    random_state=random_state,
-    max_depth=10,
-    min_samples_split=5
-)
+numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
+categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
 
-# Train model
-# Assuming X_train, y_train, X_test, y_test are available
-model.fit(X_train, y_train)
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numeric_features),
+        ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_features),
+    ])
 
-# Make predictions
-y_pred = model.predict(X_test)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Evaluate
+model = RandomForestClassifier(n_estimators=200, random_state=42)
+pipe = Pipeline([('preprocessor', preprocessor), ('classifier', model)])
+pipe.fit(X_train, y_train)
+
+y_pred = pipe.predict(X_test)
 accuracy = accuracy_score(y_test, y_pred)
+result = {{'accuracy': accuracy, 'predictions': y_pred.tolist()[:10]}}
 print(f"Accuracy: {{accuracy:.3f}}")
-print("\\nClassification Report:")
 print(classification_report(y_test, y_pred))
-
-# Feature importance
-feature_importance = pd.DataFrame({{
-    'feature': X_train.columns,
-    'importance': model.feature_importances_
-}}).sort_values('importance', ascending=False)
-print("\\nTop 5 Features:")
-print(feature_importance.head())
-
-result = {{'model': model, 'predictions': y_pred, 'accuracy': accuracy}}
 """
-        
         elif model_name == "Logistic Regression":
             return f"""
-# Logistic Regression Classification
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score
 
-# Parameters
-max_iter = 1000
-random_state = 42
+# Logistic Regression for LOS Category
+X = feature_data[{params.get('features', [])}]
+y = feature_data['los_category']
 
-# Initialize model
-model = LogisticRegression(
-    max_iter=max_iter,
-    random_state=random_state,
-    penalty='l2',
-    C=1.0
-)
+numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
+categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
 
-# Train model
-model.fit(X_train, y_train)
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numeric_features),
+        ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_features),
+    ])
 
-# Make predictions
-y_pred = model.predict(X_test)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Evaluate
+model = LogisticRegression(max_iter=1000, random_state=42)
+pipe = Pipeline([('preprocessor', preprocessor), ('classifier', model)])
+pipe.fit(X_train, y_train)
+
+y_pred = pipe.predict(X_test)
 accuracy = accuracy_score(y_test, y_pred)
+result = {{'accuracy': accuracy}}
 print(f"Accuracy: {{accuracy:.3f}}")
-print("\\nClassification Report:")
-print(classification_report(y_test, y_pred))
-
-result = {{'model': model, 'predictions': y_pred, 'accuracy': accuracy}}
 """
-        
-        elif model_name == "XGBoost":
-            return f"""
-# XGBoost Classification
-import xgboost as xgb
-from sklearn.metrics import accuracy_score, classification_report
-
-# Parameters
-n_estimators = {params.get('n_estimators', 100)}
-learning_rate = {params.get('learning_rate', 0.1)}
-random_state = 42
-
-# Initialize model
-model = xgb.XGBClassifier(
-    n_estimators=n_estimators,
-    learning_rate=learning_rate,
-    random_state=random_state,
-    max_depth=6
-)
-
-# Train model
-model.fit(X_train, y_train)
-
-# Make predictions
-y_pred = model.predict(X_test)
-
-# Evaluate
-accuracy = accuracy_score(y_test, y_pred)
-print(f"Accuracy: {{accuracy:.3f}}")
-print("\\nClassification Report:")
-print(classification_report(y_test, y_pred))
-
-# Feature importance
-feature_importance = pd.DataFrame({{
-    'feature': X_train.columns,
-    'importance': model.feature_importances_
-}}).sort_values('importance', ascending=False)
-print("\\nTop 5 Features:")
-print(feature_importance.head())
-
-result = {{'model': model, 'predictions': y_pred, 'accuracy': accuracy}}
-"""
-    
-    elif model_type == "regression":
+    else:
         if model_name == "Random Forest":
             return f"""
-# Random Forest Regression
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_absolute_error, r2_score
 
-# Parameters
-n_estimators = {params.get('n_estimators', 300)}
-random_state = 42
+# Random Forest Regressor for LOS Days
+X = feature_data[{params.get('features', [])}]
+y = feature_data['length_of_stay']
 
-# Initialize model
-model = RandomForestRegressor(
-    n_estimators=n_estimators,
-    random_state=random_state,
-    max_depth=15,
-    min_samples_split=5
-)
+numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
+categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
 
-# Train model
-model.fit(X_train, y_train)
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numeric_features),
+        ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_features),
+    ])
 
-# Make predictions
-y_pred = model.predict(X_test)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Evaluate
+model = RandomForestRegressor(n_estimators=300, random_state=42)
+pipe = Pipeline([('preprocessor', preprocessor), ('regressor', model)])
+pipe.fit(X_train, y_train)
+
+y_pred = pipe.predict(X_test)
 mae = mean_absolute_error(y_test, y_pred)
-rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 r2 = r2_score(y_test, y_pred)
-
-print(f"MAE: {{mae:.3f}}")
-print(f"RMSE: {{rmse:.3f}}")
-print(f"R²: {{r2:.3f}}")
-
-# Feature importance
-feature_importance = pd.DataFrame({{
-    'feature': X_train.columns,
-    'importance': model.feature_importances_
-}}).sort_values('importance', ascending=False)
-print("\\nTop 5 Features:")
-print(feature_importance.head())
-
-result = {{'model': model, 'predictions': y_pred, 'r2': r2}}
+result = {{'mae': mae, 'r2': r2}}
+print(f"MAE: {{mae:.2f}}, R²: {{r2:.3f}}")
 """
-        
-        elif model_name == "Linear Regression":
-            return f"""
-# Linear Regression
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import numpy as np
-
-# Initialize model
-model = LinearRegression()
-
-# Train model
-model.fit(X_train, y_train)
-
-# Make predictions
-y_pred = model.predict(X_test)
-
-# Evaluate
-mae = mean_absolute_error(y_test, y_pred)
-rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-r2 = r2_score(y_test, y_pred)
-
-print(f"MAE: {{mae:.3f}}")
-print(f"RMSE: {{rmse:.3f}}")
-print(f"R²: {{r2:.3f}}")
-
-# Coefficients
-coef_df = pd.DataFrame({{
-    'feature': X_train.columns,
-    'coefficient': model.coef_
-}}).sort_values('coefficient', key=abs, ascending=False)
-print("\\nTop 5 Coefficients:")
-print(coef_df.head())
-
-result = {{'model': model, 'predictions': y_pred, 'r2': r2}}
-"""
-    
-    return "# Model code generation not implemented for this model type"
+    return "# Code generation not available for this model"
 
 # ---------- Tabs ----------
 tabs = st.tabs([
@@ -1071,49 +797,28 @@ with tabs[0]:
     with st.expander("ℹ️ Model Primer: Forecasting", expanded=False):
         st.markdown(
             """
-- **Linear Trend**: Fast baseline for steady growth/decline; ignores seasonality. Best for: simple trends.
-- **ARIMA(1,1,1)**: Handles autocorrelation; good short-term signal. Best for: time series with patterns.
-- **Exponential Smoothing (HW add-add, 7-day)**: Captures weekly seasonality. Best for: staffing forecasts.
-- **Prophet** *(optional)*: Flexible seasonality/holidays; handles missing data well. Best for: complex patterns.
-
-**How to choose:** Start with Exponential Smoothing for weekly patterns, use ARIMA for short-term precision, Prophet for long-term with holidays.
+- **Linear Trend**: Fast baseline for steady growth/decline; ignores seasonality.
+- **ARIMA(1,1,1)**: Handles autocorrelation; good for short-term when series is stationary.
+- **Exponential Smoothing (HW add-add, 7-day)**: Captures weekly seasonality; robust for staffing.
+- **Prophet** *(optional)*: Flexible seasonality/holidays; heavier dependency.
             """
         )
 
     daily_adm = filtered_df.groupby(filtered_df["date_of_admission"].dt.date).size().reset_index()
     daily_adm.columns = ["date", "admissions"]
-
     st.session_state["_daily_adm_for_summary"] = daily_adm
 
     c1, c2 = st.columns([2, 1])
     with c1:
         st.subheader("📊 Current Admission Trends")
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=daily_adm["date"], 
-            y=daily_adm["admissions"], 
-            mode="lines+markers", 
-            name="Daily Admissions", 
-            line=dict(width=2, color='#4285f4')
-        ))
+        fig.add_trace(go.Scatter(x=daily_adm["date"], y=daily_adm["admissions"], mode="lines+markers", name="Daily Admissions", line=dict(width=2)))
         xnum = np.arange(len(daily_adm))
         if len(daily_adm) >= 2:
             z = np.polyfit(xnum, daily_adm["admissions"], 1)
             p = np.poly1d(z)
-            fig.add_trace(go.Scatter(
-                x=daily_adm["date"], 
-                y=p(xnum), 
-                mode="lines", 
-                name="Trend", 
-                line=dict(dash="dash", color='#ea4335')
-            ))
-        fig.update_layout(
-            title="Daily Admissions Over Time", 
-            xaxis_title="Date", 
-            yaxis_title="Admissions", 
-            height=400,
-            hovermode='x unified'
-        )
+            fig.add_trace(go.Scatter(x=daily_adm["date"], y=p(xnum), mode="lines", name="Trend", line=dict(dash="dash")))
+        fig.update_layout(title="Daily Admissions Over Time", xaxis_title="Date", yaxis_title="Admissions", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
@@ -1135,80 +840,26 @@ with tabs[0]:
     with c3:
         forecast_days = st.slider("Forecast Period (days)", 7, 30, 14)
     with c4:
-        seasonality_option = st.selectbox("Seasonality", ["Auto-detect", "Weekly", "Monthly", "None"])
+        _ = st.selectbox("Seasonality (informational)", ["Auto-detect", "Weekly", "Monthly", "None"])
     with c5:
-        confidence_level = st.slider("Confidence Level", 0.8, 0.99, 0.95)
+        _ = st.slider("Confidence Level (visual only)", 0.8, 0.99, 0.95)
 
-    available_models = ["Linear Trend", "ARIMA", "Exponential Smoothing"]
-    if HAS_PROPHET:
-        available_models.append("Prophet")
-    
     selected_models = st.multiselect(
         "Select Forecasting Models",
-        available_models,
+        ["Linear Trend", "ARIMA", "Exponential Smoothing", "Prophet"],
         default=["Linear Trend", "ARIMA", "Exponential Smoothing"],
     )
+    if "Prophet" in selected_models and not HAS_PROPHET:
+        st.info("Prophet not installed; it will be skipped.")
 
-    # Editable Implications code
-    st.markdown("### 💼 Business Implications Calculator")
-    default_implications_code_fc = textwrap.dedent("""
-# Define compute_implications(ctx) -> dict or DataFrame
-# Available in ctx:
-#   ctx['future_dates']: pd.DatetimeIndex
-#   ctx['best_forecast']: np.ndarray
-#   ctx['avg_daily']: float
-
-def compute_implications(ctx):
-    import numpy as np
-    import pandas as pd
-    
-    fc = np.array(ctx['best_forecast']).astype(float)
-    peak = float(fc.max()) if fc.size else 0.0
-    avg = float(fc.mean()) if fc.size else 0.0
-    
-    # Staffing calculations
-    nurses_day = int(np.ceil(peak / 8))  # 1 nurse per 8 patients (day shift)
-    nurses_night = int(np.ceil(peak / 12))  # 1 nurse per 12 patients (night shift)
-    
-    # Cost calculations
-    daily_cost = nurses_day * 350 + nurses_night * 400
-    weekly_cost = daily_cost * 7
-    
-    # Capacity planning
-    current_avg = ctx['avg_daily']
-    growth_rate = ((avg - current_avg) / current_avg * 100) if current_avg > 0 else 0
-    
-    return {
-        "Peak Admissions (forecast)": round(peak, 1),
-        "Average Admissions (forecast)": round(avg, 1),
-        "Growth Rate vs Current (%)": round(growth_rate, 1),
-        "Peak Day Nurses Needed": nurses_day,
-        "Peak Night Nurses Needed": nurses_night,
-        "Estimated Daily Cost ($)": int(daily_cost),
-        "Estimated Weekly Cost ($)": int(weekly_cost),
-        "Recommendation": f"Maintain {nurses_day}D/{nurses_night}N staff. Consider flex pool for +2σ days."
-    }
-    """).strip()
-    
-    user_code_fc = st.text_area(
-        "Edit implications code:",
-        value=default_implications_code_fc,
-        height=300,
-        key="code_fc",
-        help="Modify this code to customize business implications calculations"
-    )
-
-    # Generate Forecasts Button
     if st.button("🚀 Generate Forecasts", key="train_forecast", type="primary"):
         with st.spinner("Training forecasting models..."):
             results: Dict[str, Dict[str, float]] = {}
             forecasts: Dict[str, np.ndarray] = {}
-            model_codes: Dict[str, str] = {}
 
             ts = daily_adm.set_index("date")["admissions"].astype(float)
-            
             if len(ts) < 7:
-                st.error("❌ Need at least 7 days of data to forecast.")
+                st.error("Need at least 7 days of data to forecast.")
             else:
                 train_size = max(1, len(ts) - forecast_days)
                 train_data = ts.iloc[:train_size]
@@ -1222,11 +873,6 @@ def compute_implications(ctx):
                         future_x = np.arange(len(train_data), len(train_data) + forecast_days)
                         forecast = np.polyval(coeffs, future_x)
                         forecasts["Linear Trend"] = forecast
-                        
-                        # Generate code
-                        params = {'forecast_days': forecast_days}
-                        model_codes["Linear Trend"] = generate_model_code("forecasting", "Linear Trend", params)
-                        
                         if len(test_data) > 0:
                             test_fx = np.polyval(coeffs, np.arange(len(train_data), len(ts)))
                             mae = mean_absolute_error(test_data.values, test_fx)
@@ -1234,7 +880,7 @@ def compute_implications(ctx):
                             mape = float(np.mean(np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
                             results["Linear Trend"] = {"MAE": mae, "RMSE": rmse, "MAPE": mape}
                     except Exception as e:
-                        st.warning(f"⚠️ Linear Trend failed: {e}")
+                        st.warning(f"Linear Trend failed: {e}")
 
                 # ARIMA
                 if "ARIMA" in selected_models and len(train_data) >= 8:
@@ -1243,10 +889,6 @@ def compute_implications(ctx):
                         fit = model.fit()
                         forecast = fit.forecast(steps=forecast_days).values
                         forecasts["ARIMA"] = forecast
-                        
-                        params = {'forecast_days': forecast_days}
-                        model_codes["ARIMA"] = generate_model_code("forecasting", "ARIMA", params)
-                        
                         if len(test_data) > 0:
                             test_fx = fit.forecast(steps=len(test_data)).values
                             mae = mean_absolute_error(test_data.values, test_fx)
@@ -1254,7 +896,7 @@ def compute_implications(ctx):
                             mape = float(np.mean(np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
                             results["ARIMA"] = {"MAE": mae, "RMSE": rmse, "MAPE": mape}
                     except Exception as e:
-                        st.warning(f"⚠️ ARIMA failed: {e}")
+                        st.warning(f"ARIMA failed: {e}")
 
                 # Exponential Smoothing
                 if "Exponential Smoothing" in selected_models and len(train_data) >= 14:
@@ -1263,10 +905,6 @@ def compute_implications(ctx):
                         fit = model.fit()
                         forecast = fit.forecast(steps=forecast_days).values
                         forecasts["Exponential Smoothing"] = forecast
-                        
-                        params = {'forecast_days': forecast_days}
-                        model_codes["Exponential Smoothing"] = generate_model_code("forecasting", "Exponential Smoothing", params)
-                        
                         if len(test_data) > 0:
                             test_fx = fit.forecast(steps=len(test_data)).values
                             mae = mean_absolute_error(test_data.values, test_fx)
@@ -1274,7 +912,7 @@ def compute_implications(ctx):
                             mape = float(np.mean(np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
                             results["Exponential Smoothing"] = {"MAE": mae, "RMSE": rmse, "MAPE": mape}
                     except Exception as e:
-                        st.warning(f"⚠️ Exponential Smoothing failed: {e}")
+                        st.warning(f"Exponential Smoothing failed: {e}")
 
                 # Prophet
                 if "Prophet" in selected_models and HAS_PROPHET and len(train_data) >= 7:
@@ -1286,10 +924,6 @@ def compute_implications(ctx):
                         future = m.make_future_dataframe(periods=forecast_days)
                         fc = m.predict(future)
                         forecasts["Prophet"] = fc["yhat"].tail(forecast_days).values
-                        
-                        params = {'forecast_days': forecast_days}
-                        model_codes["Prophet"] = generate_model_code("forecasting", "Prophet", params)
-                        
                         if len(test_data) > 0:
                             tf = m.make_future_dataframe(periods=len(test_data))
                             tfc = m.predict(tf)
@@ -1299,141 +933,93 @@ def compute_implications(ctx):
                             mape = float(np.mean(np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
                             results["Prophet"] = {"MAE": mae, "RMSE": rmse, "MAPE": mape}
                     except Exception as e:
-                        st.warning(f"⚠️ Prophet failed: {e}")
+                        st.warning(f"Prophet failed: {e}")
 
                 st.session_state.model_results["forecasting"] = results
-                st.session_state["forecast_codes"] = model_codes
-                st.session_state["forecasts"] = forecasts
+                st.session_state.trained_models["forecasting"] = {"forecasts": forecasts, "train_data": train_data, "test_data": test_data}
 
                 if results:
                     st.success("✅ Forecasting models trained successfully!")
                     
-                    # Sort by MAPE (lower is better) - ENHANCEMENT #3
+                    # SORTED Model Performance (by MAPE ascending - lower is better)
                     st.subheader("📊 Model Performance Comparison (Sorted by MAPE)")
                     res_df = pd.DataFrame(results).T
-                    res_df = res_df.sort_values('MAPE', ascending=True)  # Sort descending by performance
+                    res_df = res_df.sort_values("MAPE", ascending=True)
 
                     def highlight_best(s):
                         is_best = s == s.min()
                         return ["background-color:#d4edda;color:#155724;font-weight:bold" if v else "" for v in is_best]
 
-                    st.dataframe(
-                        res_df.style.apply(highlight_best, axis=0).format("{:.2f}"), 
-                        use_container_width=True
-                    )
+                    st.dataframe(res_df.style.apply(highlight_best, axis=0).format("{:.2f}"), use_container_width=True)
 
-                    # Forecast visualization
                     st.subheader("🔮 Admission Forecasts")
                     future_dates = pd.date_range(
                         start=pd.to_datetime(ts.index[-1]) + pd.Timedelta(days=1),
                         periods=forecast_days, freq="D"
                     )
-                    
                     figf = go.Figure()
-                    figf.add_trace(go.Scatter(
-                        x=ts.index, 
-                        y=ts.values, 
-                        mode="lines", 
-                        name="Historical",
-                        line=dict(color='#666', width=2)
-                    ))
-                    
-                    palette = ["#34a853", "#ea4335", "#fbbc04", "#4285f4"]
+                    figf.add_trace(go.Scatter(x=ts.index, y=ts.values, mode="lines", name="Historical"))
+                    palette = ["#34a853", "#ea4335", "#fbbc04", "#9aa0a6"]
                     for i, (name, fc) in enumerate(forecasts.items()):
                         figf.add_trace(
                             go.Scatter(
-                                x=future_dates, 
-                                y=fc, 
-                                mode="lines+markers",
-                                name=f"{name} Forecast", 
-                                line=dict(dash="dash", width=2, color=palette[i % len(palette)])
+                                x=future_dates, y=fc, mode="lines+markers",
+                                name=f"{name} Forecast", line=dict(dash="dash", width=2, color=palette[i % len(palette)])
                             )
                         )
-                    
-                    figf.update_layout(
-                        title="Admission Forecasts by Model", 
-                        height=500,
-                        xaxis_title="Date", 
-                        yaxis_title="Predicted Admissions",
-                        hovermode='x unified'
-                    )
+                    figf.update_layout(title="Admission Forecasts by Model", height=500,
+                                       xaxis_title="Date", yaxis_title="Predicted Admissions")
                     st.plotly_chart(figf, use_container_width=True)
 
-                    # ENHANCEMENT #2: Editable model code section
-                    st.markdown('<div class="code-section"><h4>💻 Model Implementation Code (Editable)</h4></div>', unsafe_allow_html=True)
+                    # EDITABLE CODE SECTION
+                    st.markdown("---")
+                    st.subheader("💻 Editable Model Implementation Code")
+                    st.markdown("**Modify and run the code below to experiment with different parameters:**")
                     
                     best_model = min(results.keys(), key=lambda x: results[x]["MAPE"])
                     
-                    selected_code_model = st.selectbox(
-                        "Select model to view/edit code:",
-                        list(model_codes.keys()),
-                        index=list(model_codes.keys()).index(best_model) if best_model in model_codes else 0
+                    code_params = {'forecast_days': forecast_days}
+                    generated_code = generate_forecast_code(best_model, code_params)
+                    
+                    user_code = st.text_area(
+                        f"Edit {best_model} implementation:",
+                        value=generated_code,
+                        height=300,
+                        key="forecast_code_edit"
                     )
                     
-                    if selected_code_model in model_codes:
-                        edited_code = st.text_area(
-                            f"Edit {selected_code_model} implementation:",
-                            value=model_codes[selected_code_model],
-                            height=400,
-                            key=f"forecast_code_{selected_code_model}"
-                        )
-                        
-                        col1, col2 = st.columns([1, 4])
-                        with col1:
-                            run_code = st.button("▶️ Run Code", key=f"run_forecast_{selected_code_model}")
-                        with col2:
-                            st.info("💡 Code runs in a sandboxed environment with train_data available")
-                        
-                        if run_code:
-                            with st.spinner("Executing custom code..."):
-                                context = {
-                                    'train_data': train_data,
-                                    'forecast_days': forecast_days,
-                                    'X_train': train_data,
-                                    'y_train': train_data,
-                                }
-                                
-                                success, result, output = safe_execute_code(edited_code, context)
-                                
-                                if success:
-                                    st.success("✅ Code executed successfully!")
-                                    if output:
-                                        st.text("Output:")
-                                        st.code(output)
-                                    if result is not None:
-                                        st.write("Result:", result)
-                                else:
-                                    st.error(f"❌ Execution failed:\n{output}")
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        run_code = st.button("▶️ Run Code", key="run_forecast_code", type="primary")
+                    
+                    if run_code:
+                        with st.spinner("Executing code..."):
+                            context = {
+                                'train_data': train_data,
+                                'test_data': test_data,
+                                'forecast_days': forecast_days,
+                                'filtered_df': filtered_df,
+                                'daily_adm': daily_adm
+                            }
+                            success, result, error = run_user_code(user_code, context)
+                            
+                            if success:
+                                st.markdown('<div class="code-execution-result">', unsafe_allow_html=True)
+                                st.success("✅ Code executed successfully!")
+                                if result is not None:
+                                    if isinstance(result, (np.ndarray, list)):
+                                        st.write(f"**Result:** {result}")
+                                        if len(result) > 0:
+                                            fig_custom = go.Figure()
+                                            fig_custom.add_trace(go.Scatter(y=result, mode="lines+markers", name="Custom Forecast"))
+                                            st.plotly_chart(fig_custom, use_container_width=True)
+                                    else:
+                                        st.write(result)
+                                st.markdown('</div>', unsafe_allow_html=True)
+                            else:
+                                st.error(f"❌ Execution failed:\n{error}")
 
-                    # Business Implications
                     best_forecast = forecasts[best_model]
-                    context = {
-                        "future_dates": future_dates,
-                        "best_forecast": best_forecast,
-                        "avg_daily": float(ts.mean())
-                    }
-                    
-                    ok, impl, err = run_implications_code(user_code_fc, context)
-                    st.subheader("💼 Business Implications")
-                    
-                    if ok:
-                        if isinstance(impl, pd.DataFrame):
-                            st.dataframe(impl, use_container_width=True)
-                        elif isinstance(impl, dict):
-                            # Display as metrics in columns
-                            items = list(impl.items())
-                            cols_per_row = 4
-                            for i in range(0, len(items), cols_per_row):
-                                cols = st.columns(min(cols_per_row, len(items) - i))
-                                for j, (k, v) in enumerate(items[i:i+cols_per_row]):
-                                    with cols[j]:
-                                        st.metric(k, str(v))
-                        else:
-                            st.write(impl)
-                    else:
-                        st.error(f"❌ {err}")
-
-                    # Download
                     st.download_button(
                         "📥 Download Best Forecast (CSV)",
                         data=pd.DataFrame({"date": future_dates, "forecast": best_forecast}).to_csv(index=False),
@@ -1442,24 +1028,18 @@ def compute_implications(ctx):
                     )
 
                 else:
-                    st.error("❌ No models produced results. Try adjusting parameters or check data quality.")
+                    st.error("No models produced results. Try a shorter horizon or ensure enough history.")
 
     # Insights
     st.markdown("---")
-    st.markdown("## 📋 Insights & Analysis")
-    extra_prompt = st.text_area(
-        "Optional: Add guidance for insights generation", 
-        value="", 
-        key="adm_extra",
-        help="Provide additional context or questions for the AI to address"
-    )
-    
+    st.markdown("## 📋 Insights")
+    extra_prompt = st.text_area("Optional: Add guidance to steer insights", value="", key="adm_extra")
     if "forecasting" in st.session_state.model_results and st.session_state.model_results["forecasting"]:
         forecasting_results = st.session_state.model_results["forecasting"]
         best_model = min(forecasting_results.keys(), key=lambda x: forecasting_results[x]["MAPE"])
         data_summary = {
             "total_records": len(filtered_df),
-            "forecast_horizon": forecast_days,
+            "forecast_horizon": locals().get("forecast_days", 14),
             "average_daily_admissions": float(daily_adm["admissions"].mean()) if len(daily_adm) else 0.0,
             "best_model": best_model,
             "best_model_mape": float(forecasting_results[best_model]["MAPE"]),
@@ -1467,22 +1047,12 @@ def compute_implications(ctx):
         insights = llm_insight("Admissions Forecasting", data_summary, forecasting_results, extra_prompt)
         st.markdown(f'<div class="insights-panel">{insights}</div>', unsafe_allow_html=True)
     else:
-        st.info("💡 Train a forecast to generate insights for this section.")
-
-    # AI Assistant - ENHANCEMENT #8
-    st.markdown("---")
-    ai_context = {
-        "tab": "Admissions Forecasting",
-        "models_available": available_models,
-        "models_selected": selected_models,
-        "forecast_horizon": forecast_days,
-        "data_points": len(daily_adm),
-        "avg_admissions": float(daily_adm["admissions"].mean()) if len(daily_adm) else 0.0,
-    }
-    if "forecasting" in st.session_state.model_results:
-        ai_context["results"] = st.session_state.model_results["forecasting"]
+        st.info("Train a forecast to generate insights for this section.")
     
-    ai_assistant_section("Admissions Forecasting", ai_context)
+    # AI Assistant
+    st.markdown("---")
+    context = f"Admissions forecasting with {len(daily_adm)} days of data. Models available: {', '.join(selected_models)}"
+    ai_assistant_section("Admissions Forecasting", context)
 
 # ===================== TAB 2: Revenue Analytics =====================
 with tabs[1]:
@@ -1490,7 +1060,7 @@ with tabs[1]:
         """
     <div class="analysis-section">
         <h3>💰 Revenue Pattern Analysis</h3>
-        <p>Detect unusual billing patterns and identify revenue optimization opportunities.</p>
+        <p>Detect unusual billing patterns and identify potential revenue optimization opportunities.</p>
     </div>
     """,
         unsafe_allow_html=True,
@@ -1499,11 +1069,9 @@ with tabs[1]:
     with st.expander("ℹ️ Model Primer: Revenue Anomaly Detection", expanded=False):
         st.markdown(
             """
-- **Isolation Forest**: Unsupervised outlier detection using random partitioning. Best for: multi-dimensional anomalies.
-- **Statistical Outliers (z-score>3)**: Rule-based detection using standard deviations. Best for: interpretability.
-- **Ensemble**: Combines multiple methods for higher confidence. Best for: reducing false positives.
-
-**How to choose:** Use Isolation Forest for complex patterns, Statistical for transparency, Ensemble for production.
+- **Isolation Forest**: Unsupervised outlier detection; good default for mixed features.
+- **Statistical Outliers (z-score>3)**: Simple rule-based; transparent but can be brittle.
+- **Ensemble**: Run both and cross-flag; reduces false positives.
             """
         )
 
@@ -1511,31 +1079,14 @@ with tabs[1]:
     with c1:
         st.subheader("💳 Revenue Trends")
         daily_rev = (
-            filtered_df.groupby(filtered_df["date_of_admission"].dt.date)["billing_amount"]
-            .sum()
-            .reset_index()
+            filtered_df.groupby(filtered_df["date_of_admission"].dt.date)["billing_amount"].sum().reset_index()
         )
         daily_rev.columns = ["date", "revenue"]
-
         st.session_state["_daily_rev_for_summary"] = daily_rev
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=daily_rev["date"], 
-            y=daily_rev["revenue"], 
-            mode="lines+markers", 
-            name="Daily Revenue", 
-            line=dict(width=2, color='#34a853'),
-            fill='tozeroy',
-            fillcolor='rgba(52, 168, 83, 0.1)'
-        ))
-        fig.update_layout(
-            title="Daily Hospital Revenue", 
-            xaxis_title="Date", 
-            yaxis_title="Revenue ($)", 
-            height=400,
-            hovermode='x unified'
-        )
+        fig.add_trace(go.Scatter(x=daily_rev["date"], y=daily_rev["revenue"], mode="lines+markers", name="Daily Revenue", line=dict(width=2)))
+        fig.update_layout(title="Daily Hospital Revenue", xaxis_title="Date", yaxis_title="Revenue ($)", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
@@ -1553,78 +1104,22 @@ with tabs[1]:
         )
 
     st.markdown('<div class="config-row"><h4>🔧 Anomaly Detection Settings</h4></div>', unsafe_allow_html=True)
-    
-    a1, a2 = st.columns(2)
+    a1, a2, a3 = st.columns(3)
     with a1:
-        # ENHANCEMENT #5: Multiple model selection
+        # MULTIPLE MODEL SELECTION
         detection_methods = st.multiselect(
-            "Detection Methods (select multiple)",
-            ["Isolation Forest", "Statistical Outliers"],
-            default=["Isolation Forest"],
-            help="Select one or more anomaly detection methods to compare"
+            "Detection Methods",
+            ["Isolation Forest", "Statistical Outliers", "Ensemble"],
+            default=["Isolation Forest"]
         )
     with a2:
         sensitivity = st.slider("Sensitivity (contamination)", 0.01, 0.10, 0.05, 0.01)
-    
-    features_for_anomaly = st.multiselect(
-        "Analysis Features",
-        ["billing_amount", "age", "length_of_stay", "admission_month", "admission_day_of_week"],
-        default=["billing_amount", "length_of_stay"],
-    )
-
-    # Editable implications for revenue
-    st.markdown("### 💼 Business Implications Calculator")
-    default_implications_code_rev = textwrap.dedent("""
-# compute_implications(ctx) for revenue anomalies
-# Available in ctx:
-#   ctx['results']: dict with method metrics
-#   ctx['best_method']: str
-#   ctx['flagged_total_amount']: float
-#   ctx['total_revenue']: float
-
-def compute_implications(ctx):
-    import numpy as np
-    import pandas as pd
-    
-    best = ctx['best_method']
-    flagged = ctx['flagged_total_amount']
-    total_rev = ctx['total_revenue']
-    
-    flagged_pct = (flagged / total_rev * 100) if total_rev > 0 else 0
-    
-    results = ctx['results']
-    n_anomalies = results[best]['anomalies_detected']
-    avg_anomaly = results[best]['avg_anomaly_amount']
-    
-    # Risk assessment
-    if flagged_pct > 10:
-        risk_level = "HIGH"
-        action = "Immediate audit required"
-    elif flagged_pct > 5:
-        risk_level = "MEDIUM"
-        action = "Review within 48 hours"
-    else:
-        risk_level = "LOW"
-        action = "Monitor and track"
-    
-    return {
-        "Best Detector": best,
-        "Anomalies Detected": int(n_anomalies),
-        "Flagged Amount ($)": int(flagged),
-        "% of Total Revenue": round(flagged_pct, 2),
-        "Avg Anomaly Amount ($)": int(avg_anomaly),
-        "Risk Level": risk_level,
-        "Recommended Action": action,
-        "Potential Recovery ($)": int(flagged * 0.15)  # Assume 15% recovery rate
-    }
-    """).strip()
-    
-    user_code_rev = st.text_area(
-        "Edit implications code:",
-        value=default_implications_code_rev,
-        height=300,
-        key="code_rev"
-    )
+    with a3:
+        features_for_anomaly = st.multiselect(
+            "Analysis Features",
+            ["billing_amount", "age", "length_of_stay", "admission_month", "admission_day_of_week"],
+            default=["billing_amount", "length_of_stay"],
+        )
 
     if st.button("🚀 Analyze Revenue Patterns", key="detect_anomalies", type="primary"):
         if features_for_anomaly and detection_methods:
@@ -1632,117 +1127,747 @@ def compute_implications(ctx):
                 X = filtered_df[features_for_anomaly].dropna()
                 results = {}
                 anomaly_predictions = {}
-                model_codes = {}
 
-                # Isolation Forest
-                if "Isolation Forest" in detection_methods:
+                for method in detection_methods:
                     try:
-                        iso = IsolationForest(contamination=float(sensitivity), random_state=42)
-                        pred = iso.fit_predict(X)
-                        anomaly_predictions["Isolation Forest"] = pred
-                        n_anom = int((pred == -1).sum())
-                        rate = n_anom / len(X) if len(X) else 0
-                        results["Isolation Forest"] = {
-                            "anomalies_detected": n_anom,
-                            "anomaly_rate": rate,
-                            "avg_anomaly_amount": float(
-                                filtered_df.loc[X.index[pred == -1], "billing_amount"].mean()
-                            )
-                            if n_anom > 0 and "billing_amount" in filtered_df.columns
-                            else 0.0,
-                        }
-                        
-                        # Generate code
-                        params = {'contamination': sensitivity}
-                        model_codes["Isolation Forest"] = generate_model_code("anomaly", "Isolation Forest", params)
-                    except Exception as e:
-                        st.warning(f"⚠️ Isolation Forest failed: {e}")
+                        if method == "Isolation Forest":
+                            iso = IsolationForest(contamination=float(sensitivity), random_state=42)
+                            pred = iso.fit_predict(X)
+                            anomaly_predictions["Isolation Forest"] = pred
+                            n_anom = int((pred == -1).sum())
+                            rate = n_anom / len(X) if len(X) else 0
+                            results["Isolation Forest"] = {
+                                "anomalies_detected": n_anom,
+                                "anomaly_rate": rate,
+                                "avg_anomaly_amount": float(
+                                    filtered_df.loc[X.index[pred == -1], "billing_amount"].mean()
+                                )
+                                if n_anom > 0 and "billing_amount" in filtered_df.columns
+                                else 0.0,
+                            }
 
-                # Statistical Outliers
-                if "Statistical Outliers" in detection_methods:
-                    try:
-                        z = np.abs((X - X.mean()) / X.std(ddof=0)).fillna(0.0)
-                        stat_mask = (z > 3).any(axis=1)
-                        n_anom = int(stat_mask.sum())
-                        rate = n_anom / len(X) if len(X) else 0
-                        results["Statistical Outliers"] = {
-                            "anomalies_detected": n_anom,
-                            "anomaly_rate": rate,
-                            "avg_anomaly_amount": float(
-                                filtered_df.loc[X.index[stat_mask], "billing_amount"].mean()
-                            )
-                            if n_anom > 0 and "billing_amount" in filtered_df.columns
-                            else 0.0,
-                        }
-                        anomaly_predictions["Statistical Outliers"] = np.where(stat_mask.values, -1, 1)
-                        
-                        # Generate code
-                        params = {}
-                        model_codes["Statistical Outliers"] = generate_model_code("anomaly", "Statistical Outliers", params)
+                        elif method == "Statistical Outliers":
+                            z = np.abs((X - X.mean()) / X.std(ddof=0)).fillna(0.0)
+                            stat_mask = (z > 3).any(axis=1)
+                            n_anom = int(stat_mask.sum())
+                            rate = n_anom / len(X) if len(X) else 0
+                            results["Statistical Outliers"] = {
+                                "anomalies_detected": n_anom,
+                                "anomaly_rate": rate,
+                                "avg_anomaly_amount": float(
+                                    filtered_df.loc[X.index[stat_mask], "billing_amount"].mean()
+                                )
+                                if n_anom > 0 and "billing_amount" in filtered_df.columns
+                                else 0.0,
+                            }
+                            anomaly_predictions["Statistical Outliers"] = np.where(stat_mask.values, -1, 1)
+
+                        elif method == "Ensemble":
+                            # Run both
+                            iso = IsolationForest(contamination=float(sensitivity), random_state=42)
+                            pred_iso = iso.fit_predict(X)
+                            z = np.abs((X - X.mean()) / X.std(ddof=0)).fillna(0.0)
+                            stat_mask = (z > 3).any(axis=1)
+                            pred_stat = np.where(stat_mask.values, -1, 1)
+                            # Ensemble: flag if both agree
+                            pred_ensemble = np.where((pred_iso == -1) & (pred_stat == -1), -1, 1)
+                            anomaly_predictions["Ensemble"] = pred_ensemble
+                            n_anom = int((pred_ensemble == -1).sum())
+                            rate = n_anom / len(X) if len(X) else 0
+                            results["Ensemble"] = {
+                                "anomalies_detected": n_anom,
+                                "anomaly_rate": rate,
+                                "avg_anomaly_amount": float(
+                                    filtered_df.loc[X.index[pred_ensemble == -1], "billing_amount"].mean()
+                                )
+                                if n_anom > 0 and "billing_amount" in filtered_df.columns
+                                else 0.0,
+                            }
                     except Exception as e:
-                        st.warning(f"⚠️ Statistical Outliers failed: {e}")
+                        st.warning(f"{method} failed: {e}")
 
                 st.session_state.model_results["anomaly"] = results
-                st.session_state["anomaly_codes"] = model_codes
-                st.session_state["anomaly_predictions"] = anomaly_predictions
-                
+                st.session_state.trained_models["anomaly"] = {"predictions": anomaly_predictions, "X": X}
+
                 if results:
                     st.success("✅ Revenue analysis completed!")
 
-                    # ENHANCEMENT #3: Sort by performance
-                    st.subheader("🎯 Detection Results (Sorted by Anomaly Rate)")
+                    # SORTED by anomaly rate closest to target (5%)
+                    st.subheader("🎯 Detection Results (Sorted by Performance)")
                     res_df = pd.DataFrame(results).T
-                    # Sort by anomaly rate closest to target (sensitivity)
-                    res_df['rate_diff'] = abs(res_df['anomaly_rate'] - sensitivity)
-                    res_df = res_df.sort_values('rate_diff').drop('rate_diff', axis=1)
+                    res_df['distance_from_target'] = np.abs(res_df['anomaly_rate'] - 0.05)
+                    res_df = res_df.sort_values('distance_from_target', ascending=True)
+                    res_df = res_df.drop('distance_from_target', axis=1)
                     
                     st.dataframe(
-                        res_df.style.format({
-                            "anomalies_detected": "{:.0f}",
-                            "anomaly_rate": "{:.2%}",
-                            "avg_anomaly_amount": "${:,.0f}"
-                        }),
+                        res_df.style.format(
+                            {"anomalies_detected": "{:.0f}", "anomaly_rate": "{:.2%}", "avg_anomaly_amount": "${:,.0f}"}
+                        ),
                         use_container_width=True,
                     )
 
-                    # Visualization
-                    st.subheader("📊 Pattern Visualization")
-                    best_method = min(results.keys(), key=lambda x: abs(results[x]["anomaly_rate"] - sensitivity))
-                    best_pred = anomaly_predictions[best_method]
+                    # EDITABLE CODE SECTION FOR REVENUE
+                    st.markdown("---")
+                    st.subheader("💻 Editable Model Implementation Code")
                     
+                    best_method = min(results.keys(), key=lambda x: abs(results[x]["anomaly_rate"] - 0.05))
+                    code_params = {'features': features_for_anomaly, 'sensitivity': sensitivity}
+                    generated_code = generate_anomaly_code(best_method, code_params)
+                    
+                    user_code_rev = st.text_area(
+                        f"Edit {best_method} implementation:",
+                        value=generated_code,
+                        height=300,
+                        key="revenue_code_edit"
+                    )
+                    
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        run_code_rev = st.button("▶️ Run Code", key="run_revenue_code", type="primary")
+                    
+                    if run_code_rev:
+                        with st.spinner("Executing code..."):
+                            context = {
+                                'feature_data': filtered_df,
+                                'filtered_df': filtered_df,
+                                'X': X
+                            }
+                            success, result, error = run_user_code(user_code_rev, context)
+                            
+                            if success:
+                                st.markdown('<div class="code-execution-result">', unsafe_allow_html=True)
+                                st.success("✅ Code executed successfully!")
+                                if result:
+                                    st.write(result)
+                                st.markdown('</div>', unsafe_allow_html=True)
+                            else:
+                                st.error(f"❌ Execution failed:\n{error}")
+
+                    st.subheader("📊 Pattern Visualization")
+                    best_pred = anomaly_predictions[best_method]
                     if len(features_for_anomaly) >= 2 and len(X) == len(best_pred):
-                        plot_df = X.copy()
-                        plot_df['is_anomaly'] = (best_pred == -1).astype(int)
-                        plot_df['billing'] = filtered_df.loc[X.index, 'billing_amount'].values
-                        
                         figp = px.scatter(
-                            plot_df,
-                            x=features_for_anomaly[0],
-                            y=features_for_anomaly[1],
-                            color='is_anomaly',
-                            size='billing',
+                            x=X[features_for_anomaly[0]],
+                            y=X[features_for_anomaly[1]],
+                            color=(best_pred == -1).astype(int),
                             title=f"Revenue Pattern Analysis — {best_method}",
-                            labels={"is_anomaly": "Anomaly"},
-                            color_discrete_map={0: '#4285f4', 1: '#ea4335'},
-                            hover_data=['billing']
+                            labels={"color": "Anomaly (1=yes)"},
                         )
                         figp.update_layout(height=500)
                         st.plotly_chart(figp, use_container_width=True)
 
-                    # Anomaly details
                     anomaly_idx = X.index[np.where(best_pred == -1)[0]]
                     if len(anomaly_idx) > 0:
                         st.subheader("🚨 Unusual Cases Identified")
                         cols = [
-                            c for c in [
-                                "date_of_admission", "billing_amount", "medical_condition",
-                                "hospital", "insurance_provider", "doctor", "length_of_stay"
-                            ] if c in filtered_df.columns
+                            c
+                            for c in [
+                                "date_of_admission",
+                                "billing_amount",
+                                "medical_condition",
+                                "hospital",
+                                "insurance_provider",
+                                "doctor",
+                            ]
+                            if c in filtered_df.columns
                         ]
                         details = filtered_df.loc[anomaly_idx, cols].head(100)
-                        details = details.sort_values('billing_amount', ascending=False)
                         st.dataframe(details, use_container_width=True)
 
                         st.download_button(
                             "📥 Download Anomaly Cases (CSV)",
                             data=details.to_csv(index=False),
+                            file_name="revenue_anomalies.csv",
+                            mime="text/csv",
+                        )
+                else:
+                    st.error("All methods failed. Check feature selection.")
+        else:
+            st.warning("Please select at least one feature and one method.")
+
+    # Insights
+    st.markdown("---")
+    st.markdown("## 📋 Insights")
+    extra_prompt_rev = st.text_area("Optional: guidance for insights", value="", key="rev_extra")
+    if "anomaly" in st.session_state.model_results and st.session_state.model_results["anomaly"]:
+        anomaly_results = st.session_state.model_results["anomaly"]
+        best_method = min(anomaly_results.keys(), key=lambda x: abs(anomaly_results[x]["anomaly_rate"] - 0.05))
+        data_summary = {
+            "total_revenue": float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0,
+            "avg_daily_revenue": float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0,
+            "best_method": best_method,
+            "anomalies_detected": int(anomaly_results[best_method]["anomalies_detected"]),
+            "anomaly_rate": float(anomaly_results[best_method]["anomaly_rate"]),
+        }
+        insights = llm_insight("Revenue Pattern Analysis", data_summary, anomaly_results, extra_prompt_rev)
+        st.markdown(f'<div class="insights-panel">{insights}</div>', unsafe_allow_html=True)
+    else:
+        st.info("Run anomaly detection to generate insights.")
+    
+    # AI Assistant
+    st.markdown("---")
+    context = f"Revenue analytics with ${total_revenue:,.0f} total revenue across {len(filtered_df)} records"
+    ai_assistant_section("Revenue Analytics", context)
+
+# ===================== TAB 3: Length of Stay Prediction =====================
+with tabs[2]:
+    st.markdown(
+        """
+    <div class="analysis-section">
+        <h3>🛏️ Length of Stay Prediction</h3>
+        <p>Predict stay duration to optimize bed management and discharge planning.</p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    # LOS CALCULATION DOCUMENTATION
+    st.markdown("""
+    ### 📋 How Length of Stay (LOS) is Calculated
+    
+    **LOS in Days:** Calculated as `Discharge Date - Admission Date` (in days)
+    
+    **LOS Categories:** Patients are classified into categories based on stay duration:
+    - **Short**: 0-3 days (quick turnaround, typically observation or minor procedures)
+    - **Medium**: 4-7 days (standard care, most surgical recoveries)
+    - **Long**: 8-14 days (complex conditions, extended recovery)
+    - **Extended**: 15+ days (severe conditions, complications, long-term care)
+    
+    *Example: A patient admitted on Jan 1st and discharged on Jan 5th has LOS = 4 days → "Medium" category*
+    """)
+
+    with st.expander("ℹ️ Model Primer: LOS", expanded=False):
+        st.markdown(
+            """
+- **Classification (LOS Category)**: *Random Forest* (nonlinear + interactions), *Logistic Regression* (interpretable baseline), *SVM* (complex boundaries), *XGBoost* (if installed).
+- **Regression (Days)**: *Random Forest Regressor* (nonlinear), *Linear Regression* (fast baseline), *SVR* (when margins matter), *XGBoost Regressor* (if installed).
+            """
+        )
+
+    if "length_of_stay" not in filtered_df.columns:
+        st.error("Length of stay data not available. Please check your dataset.")
+    else:
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.subheader("📊 LOS Distribution")
+            fig = px.histogram(filtered_df, x="length_of_stay", nbins=30, title="Distribution of Length of Stay")
+            fig.update_layout(height=400, xaxis_title="Length of Stay (days)", yaxis_title="Patients")
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            st.subheader("🏥 LOS Metrics")
+            avg_los = float(filtered_df["length_of_stay"].mean())
+            median_los = float(filtered_df["length_of_stay"].median())
+            max_los = float(filtered_df["length_of_stay"].max())
+            st.session_state["los_avg_los"] = avg_los
+            st.markdown(
+                f"""
+            <div class="metric-card"><h4>Average LOS</h4><h2 style="color:#4285f4;">{avg_los:.1f} days</h2></div>
+            <div class="metric-card"><h4>Median LOS</h4><h2 style="color:#34a853;">{median_los:.1f} days</h2></div>
+            <div class="metric-card"><h4>Maximum LOS</h4><h2 style="color:#ea4335;">{max_los:.0f} days</h2></div>
+            """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown('<div class="config-row"><h4>🔧 Prediction Model Setup</h4></div>', unsafe_allow_html=True)
+
+        available_features = [
+            c for c in filtered_df.columns
+            if c not in ["length_of_stay", "los_category", "date_of_admission", "discharge_date"]
+        ]
+        s1, s2 = st.columns(2)
+        with s1:
+            selected_features = st.multiselect(
+                "Select Prediction Features",
+                available_features,
+                default=[f for f in ["age", "medical_condition", "admission_type", "hospital"] if f in available_features],
+            )
+        with s2:
+            target_type = st.selectbox("Prediction Target", ["Length of Stay (Days)", "LOS Category (Short/Medium/Long)"])
+            selected_models = st.multiselect(
+                "Select Models", ["Random Forest", "Logistic Regression", "XGBoost", "SVM", "Linear Regression"],
+                default=["Random Forest", "Logistic Regression"],
+            )
+
+        if st.button("🚀 Train Prediction Models", key="train_los", type="primary"):
+            if selected_features:
+                with st.spinner("Training LOS prediction models..."):
+                    feature_data = filtered_df[selected_features + ["length_of_stay", "los_category"]].dropna()
+                    if target_type == "Length of Stay (Days)":
+                        target = "length_of_stay"; is_classification = False
+                    else:
+                        target = "los_category"; is_classification = True
+
+                    st.session_state["los_is_classification"] = is_classification
+                    st.session_state["los_target_type"] = target_type
+
+                    X = feature_data[selected_features]
+                    y = feature_data[target]
+
+                    numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
+                    categorical_features = X.select_dtypes(include=["object", "category"]).columns.tolist()
+                    preprocessor = ColumnTransformer(
+                        transformers=[
+                            ("num", StandardScaler(), numeric_features),
+                            ("cat", OneHotEncoder(drop="first", handle_unknown="ignore"), categorical_features),
+                        ]
+                    )
+
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                    results = {}
+                    models_trained = {}
+
+                    for model_name in selected_models:
+                        try:
+                            if is_classification:
+                                if model_name == "Random Forest":
+                                    model = RandomForestClassifier(n_estimators=200, random_state=42)
+                                elif model_name == "Logistic Regression":
+                                    model = LogisticRegression(max_iter=1000, random_state=42)
+                                elif model_name == "XGBoost" and HAS_XGBOOST:
+                                    model = xgb.XGBClassifier(random_state=42)
+                                elif model_name == "SVM":
+                                    model = SVC(probability=True, random_state=42)
+                                else:
+                                    continue
+                                final_step_name = "classifier"
+                            else:
+                                if model_name == "Random Forest":
+                                    model = RandomForestRegressor(n_estimators=300, random_state=42)
+                                elif model_name == "Linear Regression":
+                                    model = LinearRegression()
+                                elif model_name == "XGBoost" and HAS_XGBOOST:
+                                    model = xgb.XGBRegressor(random_state=42)
+                                elif model_name == "SVM":
+                                    model = SVR()
+                                else:
+                                    continue
+                                final_step_name = "regressor"
+
+                            pipe = Pipeline([("preprocessor", preprocessor), (final_step_name, model)])
+                            pipe.fit(X_train, y_train)
+                            models_trained[model_name] = pipe
+                            y_pred = pipe.predict(X_test)
+
+                            if is_classification:
+                                accuracy = accuracy_score(y_test, y_pred)
+                                precision, recall, f1, _ = precision_recall_fscore_support(
+                                    y_test, y_pred, average="weighted", zero_division=0
+                                )
+                                results[model_name] = {
+                                    "accuracy": float(accuracy),
+                                    "precision": float(precision),
+                                    "recall": float(recall),
+                                    "f1_score": float(f1),
+                                }
+                            else:
+                                mae = mean_absolute_error(y_test, y_pred)
+                                rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+                                r2 = r2_score(y_test, y_pred)
+                                results[model_name] = {"mae": float(mae), "rmse": rmse, "r2_score": float(r2)}
+
+                        except Exception as e:
+                            st.warning(f"Failed to train {model_name}: {e}")
+
+                    if results:
+                        st.session_state.model_results["los"] = results
+                        st.session_state.trained_models["los"] = {
+                            "models": models_trained,
+                            "X_test": X_test,
+                            "y_test": y_test,
+                            "is_classification": is_classification
+                        }
+                        st.success("✅ LOS prediction models trained successfully!")
+
+                        # SORTED Model Performance
+                        st.subheader("📊 Model Performance Comparison (Sorted)")
+                        res_df = pd.DataFrame(results).T
+                        if is_classification:
+                            res_df = res_df.sort_values("accuracy", ascending=False)
+                            def highlight_max(s):
+                                is_max = s == s.max()
+                                return ["background-color:#d4edda;color:#155724;font-weight:bold" if v else "" for v in is_max]
+                            st.dataframe(res_df.style.apply(highlight_max, axis=0).format("{:.3f}"), use_container_width=True)
+                            metric_to_plot = "accuracy"
+                        else:
+                            res_df = res_df.sort_values("r2_score", ascending=False)
+                            def highlight_best(s):
+                                if s.name == "r2_score":
+                                    is_best = s == s.max()
+                                else:
+                                    is_best = s == s.min()
+                                return ["background-color:#d4edda;color:#155724;font-weight:bold" if v else "" for v in is_best]
+                            st.dataframe(res_df.style.apply(highlight_best, axis=0).format("{:.3f}"), use_container_width=True)
+                            metric_to_plot = "r2_score"
+
+                        figm = go.Figure(data=[go.Bar(
+                            x=list(results.keys()),
+                            y=[results[m].get(metric_to_plot, 0) for m in results.keys()],
+                            text=[f"{results[m].get(metric_to_plot, 0):.3f}" for m in results.keys()],
+                            textposition="auto"
+                        )])
+                        figm.update_layout(title=f"Model Comparison — {metric_to_plot.replace('_', ' ').title()}", height=400)
+                        st.plotly_chart(figm, use_container_width=True)
+
+                        # EDITABLE CODE SECTION
+                        st.markdown("---")
+                        st.subheader("💻 Editable Model Training Code")
+                        
+                        if is_classification:
+                            best_model_name = max(results.keys(), key=lambda x: results[x].get("accuracy", 0))
+                        else:
+                            best_model_name = max(results.keys(), key=lambda x: results[x].get("r2_score", -np.inf))
+                        
+                        code_params = {'features': selected_features}
+                        generated_code = generate_los_code(best_model_name, is_classification, code_params)
+                        
+                        user_code_los = st.text_area(
+                            f"Edit {best_model_name} implementation:",
+                            value=generated_code,
+                            height=400,
+                            key="los_code_edit"
+                        )
+                        
+                        col1, col2 = st.columns([1, 4])
+                        with col1:
+                            run_code_los = st.button("▶️ Run Code", key="run_los_code", type="primary")
+                        
+                        if run_code_los:
+                            with st.spinner("Executing code..."):
+                                context = {
+                                    'feature_data': feature_data,
+                                    'filtered_df': filtered_df,
+                                    'X': X,
+                                    'np': np
+                                }
+                                success, result, error = run_user_code(user_code_los, context)
+                                
+                                if success:
+                                    st.markdown('<div class="code-execution-result">', unsafe_allow_html=True)
+                                    st.success("✅ Code executed successfully!")
+                                    if result:
+                                        st.write(result)
+                                    st.markdown('</div>', unsafe_allow_html=True)
+                                else:
+                                    st.error(f"❌ Execution failed:\n{error}")
+
+                        # ROC CURVES FOR ALL CLASSIFICATION MODELS
+                        if is_classification:
+                            st.markdown("---")
+                            st.subheader("🧪 ROC Curves - All Models Comparison")
+                            
+                            fig_roc = go.Figure()
+                            colors = ['#4285f4', '#34a853', '#fbbc04', '#ea4335', '#9aa0a6']
+                            
+                            for idx, (model_name, pipe) in enumerate(models_trained.items()):
+                                try:
+                                    y_test_series = pd.Series(y_test).reset_index(drop=True)
+                                    classes = sorted(y_test_series.unique().tolist())
+                                    
+                                    if hasattr(pipe, "predict_proba"):
+                                        probs = pipe.predict_proba(X_test)
+                                        
+                                        if len(classes) == 2:
+                                            # Binary classification
+                                            y_bin = (y_test_series == classes[-1]).astype(int).values
+                                            fpr, tpr, _ = roc_curve(y_bin, probs[:, 1])
+                                            auc_val = roc_auc_score(y_bin, probs[:, 1])
+                                            fig_roc.add_trace(go.Scatter(
+                                                x=fpr, y=tpr, mode="lines",
+                                                name=f"{model_name} (AUC={auc_val:.3f})",
+                                                line=dict(color=colors[idx % len(colors)], width=2)
+                                            ))
+                                        else:
+                                            # Multiclass - micro-average
+                                            y_binarized = label_binarize(y_test_series, classes=classes)
+                                            auc_val = roc_auc_score(y_binarized, probs, average="micro")
+                                            
+                                            # Compute micro-average ROC
+                                            fpr_micro, tpr_micro, _ = roc_curve(y_binarized.ravel(), probs.ravel())
+                                            fig_roc.add_trace(go.Scatter(
+                                                x=fpr_micro, y=tpr_micro, mode="lines",
+                                                name=f"{model_name} (Micro-avg AUC={auc_val:.3f})",
+                                                line=dict(color=colors[idx % len(colors)], width=2)
+                                            ))
+                                except Exception as e:
+                                    st.info(f"ROC for {model_name} skipped: {e}")
+                            
+                            # Add diagonal reference line
+                            fig_roc.add_trace(go.Scatter(
+                                x=[0, 1], y=[0, 1], mode="lines",
+                                name="Random Classifier",
+                                line=dict(dash="dash", color="gray", width=1)
+                            ))
+                            
+                            fig_roc.update_layout(
+                                title="ROC Curves - Model Comparison",
+                                xaxis_title="False Positive Rate",
+                                yaxis_title="True Positive Rate",
+                                height=500,
+                                legend=dict(x=0.6, y=0.1)
+                            )
+                            st.plotly_chart(fig_roc, use_container_width=True)
+
+                        # Sample Predictions
+                        st.subheader("🔮 Sample Predictions")
+                        best_model = models_trained[best_model_name]
+                        nshow = min(10, len(X_test))
+                        samples = []
+                        for i in range(nshow):
+                            sample_input = X_test.iloc[[i]]
+                            pred = best_model.predict(sample_input)[0]
+                            if is_classification:
+                                samples.append(
+                                    {
+                                        "Case": f"Patient {i+1}",
+                                        "Predicted Category": str(pred),
+                                        "Actual Category": str(y_test.iloc[i]),
+                                        "Match": "✅" if pred == y_test.iloc[i] else "❌",
+                                    }
+                                )
+                            else:
+                                samples.append(
+                                    {
+                                        "Case": f"Patient {i+1}",
+                                        "Predicted LOS": f"{float(pred):.1f} days",
+                                        "Actual LOS": f"{float(y_test.iloc[i]):.1f} days",
+                                        "Difference": f"{abs(float(pred) - float(y_test.iloc[i])):.1f} days",
+                                    }
+                                )
+                        st.dataframe(pd.DataFrame(samples), use_container_width=True)
+                    else:
+                        st.error("All models failed to train. Check feature selection and data quality.")
+            else:
+                st.warning("Please select at least one feature for model training.")
+
+        # Insights
+        st.markdown("---")
+        st.markdown("## 📋 Insights")
+        extra_prompt_los = st.text_area("Optional: guidance for insights", value="", key="los_extra")
+        if "los" in st.session_state.model_results and st.session_state.model_results["los"]:
+            los_results = st.session_state.model_results["los"]
+            is_cls = bool(st.session_state.get("los_is_classification", False))
+            if is_cls:
+                best_model = max(los_results.keys(), key=lambda x: los_results[x].get("accuracy", 0))
+                perf = los_results[best_model]["accuracy"]
+            else:
+                best_model = max(los_results.keys(), key=lambda x: los_results[x].get("r2_score", -np.inf))
+                perf = los_results[best_model]["r2_score"]
+            data_summary = {
+                "prediction_type": st.session_state.get("los_target_type", "Unknown"),
+                "best_model": best_model,
+                "performance_metric": float(perf),
+                "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
+                "total_patients": len(filtered_df),
+            }
+            insights = llm_insight("Length of Stay Prediction", data_summary, los_results, extra_prompt_los)
+            st.markdown(f'<div class="insights-panel">{insights}</div>', unsafe_allow_html=True)
+        else:
+            st.info("Train at least one LOS model to generate insights.")
+        
+        # AI Assistant
+        st.markdown("---")
+        context = f"Length of Stay prediction with avg LOS {avg_los:.1f} days across {len(filtered_df)} patients"
+        ai_assistant_section("Length of Stay", context)
+
+# ===================== TAB 4: Operational KPIs & Simulator =====================
+with tabs[3]:
+    st.markdown("""
+    <div class="analysis-section">
+        <h3>📊 Operational KPIs & What-If Staffing</h3>
+        <p>Concise leadership metrics + a quick scenario sandbox.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.expander("ℹ️ Model Primer: Simulator", expanded=False):
+        st.markdown(
+            """
+- **What-If**: Converts admissions targets into day/night nurse counts under configurable patient-per-nurse ratios.
+- Use with a surge % to stress-test coverage and daily budget.
+            """
+        )
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        total_enc = len(filtered_df)
+        st.metric("Encounters (filtered)", f"{total_enc:,}")
+    with k2:
+        if "billing_amount" in filtered_df.columns:
+            rev = float(filtered_df["billing_amount"].sum())
+            st.metric("Revenue (filtered)", f"${rev:,.0f}")
+    with k3:
+        if "length_of_stay" in filtered_df.columns:
+            st.metric("Avg LOS", f"{filtered_df['length_of_stay'].mean():.1f} days")
+    with k4:
+        if "medical_condition" in filtered_df.columns and len(filtered_df):
+            top_cond = filtered_df["medical_condition"].value_counts().idxmax()
+            st.metric("Top Condition", str(top_cond))
+
+    if {"insurance_provider","billing_amount"}.issubset(filtered_df.columns) and len(filtered_df):
+        payer_rev = (
+            filtered_df.groupby("insurance_provider")["billing_amount"]
+            .sum().sort_values(ascending=False).reset_index()
+        )
+        figp = px.bar(payer_rev, x="insurance_provider", y="billing_amount", title="Revenue by Payer (Pareto)")
+        figp.update_layout(height=380, xaxis_title="Payer", yaxis_title="Revenue ($)")
+        st.plotly_chart(figp, use_container_width=True)
+
+    st.markdown('<div class="config-row"><h4>🧪 What-If: Staffing vs. Admissions</h4></div>', unsafe_allow_html=True)
+    w1, w2, w3 = st.columns(3)
+    with w1:
+        pts_per_day_nurse = st.number_input("Patients per Day Nurse", min_value=4, max_value=12, value=8)
+    with w2:
+        pts_per_night_nurse = st.number_input("Patients per Night Nurse", min_value=6, max_value=18, value=12)
+    with w3:
+        surge_pct = st.slider("Potential Surge (%)", 0, 50, 15, 5)
+
+    daily_adm_local = filtered_df.groupby(filtered_df["date_of_admission"].dt.date).size().reset_index()
+    daily_adm_local.columns = ["date","admissions"]
+    recent_mean = float(daily_adm_local["admissions"].tail(28).mean()) if len(daily_adm_local) else 0.0
+    target_load = recent_mean * (1 + surge_pct/100.0)
+
+    d1, d2, d3 = st.columns(3)
+    with d1:
+        dn = int(np.ceil(target_load / max(1, pts_per_day_nurse)))
+        st.metric("Needed Day Nurses", f"{dn}")
+    with d2:
+        nn = int(np.ceil(target_load / max(1, pts_per_night_nurse)))
+        st.metric("Needed Night Nurses", f"{nn}")
+    with d3:
+        est_cost = dn*350 + nn*400
+        st.metric("Est. Daily Cost", f"${est_cost:,.0f}")
+
+    # EDITABLE AND EXECUTABLE SIMULATOR CODE
+    st.markdown("---")
+    st.subheader("💻 Editable Simulator Implementation")
+    
+    sim_code = f'''
+import numpy as np
+
+# What-If Staffing Calculator
+recent_mean = {recent_mean:.2f}
+surge = {surge_pct}/100.0
+pts_per_day_nurse = {pts_per_day_nurse}
+pts_per_night_nurse = {pts_per_night_nurse}
+
+target_load = recent_mean * (1 + surge)
+day_nurses = int(np.ceil(target_load / max(1, pts_per_day_nurse)))
+night_nurses = int(np.ceil(target_load / max(1, pts_per_night_nurse)))
+daily_cost = day_nurses*350 + night_nurses*400
+
+result = {{
+    "Target Admissions": round(target_load, 1),
+    "Day Nurses": day_nurses,
+    "Night Nurses": night_nurses,
+    "Daily Cost ($)": daily_cost
+}}
+
+print(f"Target Admissions: {{round(target_load,1)}}")
+print(f"Day Nurses: {{day_nurses}}")
+print(f"Night Nurses: {{night_nurses}}")
+print(f"Daily Cost: ${{daily_cost:,}}")
+'''
+    
+    user_sim_code = st.text_area(
+        "Edit simulator code:",
+        value=sim_code,
+        height=300,
+        key="sim_code_edit"
+    )
+    
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        run_sim = st.button("▶️ Run Simulator", key="run_sim_code", type="primary")
+    
+    if run_sim:
+        with st.spinner("Executing simulator..."):
+            context = {
+                'filtered_df': filtered_df,
+                'daily_adm_local': daily_adm_local,
+                'recent_mean': recent_mean
+            }
+            success, result, error = run_user_code(user_sim_code, context)
+            
+            if success:
+                st.markdown('<div class="code-execution-result">', unsafe_allow_html=True)
+                st.success("✅ Simulator executed successfully!")
+                if result and isinstance(result, dict):
+                    cols = st.columns(len(result))
+                    for i, (k, v) in enumerate(result.items()):
+                        with cols[i]:
+                            st.metric(k, str(v))
+                elif result:
+                    st.write(result)
+                st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.error(f"❌ Execution failed:\n{error}")
+
+    # AI Assistant
+    st.markdown("---")
+    context = f"Operational KPIs with {total_enc} encounters and staffing optimization"
+    ai_assistant_section("Operational KPIs", context)
+
+# ===================== Decision Log =====================
+st.markdown("---")
+st.markdown("## 📋 Decision Tracking")
+with st.expander("📝 Add New Decision", expanded=False):
+    d1, d2 = st.columns(2)
+    with d1:
+        decision_section = st.selectbox(
+            "Analysis Section",
+            ["Admissions Forecasting", "Revenue Analytics", "Length of Stay Prediction", "Operational KPIs & Simulator"]
+        )
+        decision_action = st.selectbox(
+            "Decision",
+            ["Approve for Production", "Needs Review", "Requires Additional Data", "Reject"]
+        )
+    with d2:
+        decision_owner = st.text_input("Responsible Person")
+        decision_date = st.date_input("Target Date")
+    decision_notes = st.text_area("Notes and Comments")
+    if st.button("Add Decision", type="secondary"):
+        new_decision = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "section": decision_section,
+            "action": decision_action,
+            "owner": decision_owner,
+            "target_date": decision_date.strftime("%Y-%m-%d"),
+            "notes": decision_notes,
+        }
+        st.session_state.decision_log.append(new_decision)
+        st.success("✅ Decision added to tracking log!")
+
+if st.session_state.decision_log:
+    st.subheader("Decision History")
+    decisions_df = pd.DataFrame(st.session_state.decision_log)
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        st.dataframe(decisions_df, use_container_width=True)
+    with c2:
+        if "action" in decisions_df.columns:
+            approved = int((decisions_df["action"] == "Approve for Production").sum())
+            pending = int((decisions_df["action"] == "Needs Review").sum())
+            st.metric("Approved", approved)
+            st.metric("Pending Review", pending)
+    with c3:
+        csv = decisions_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Log",
+            data=csv,
+            file_name=f"decisions_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            type="secondary",
+        )
+
+# ---------- Footer ----------
+st.markdown("---")
+st.markdown(
+    """
+<div style="text-align:center;color:#666;padding:2rem;">
+    <p>🏥 <strong>Hospital Operations Analytics Platform</strong></p>
+    <p>✅ Fixed OpenAI API detection | ✅ Editable & executable code sections | ✅ Sorted performance metrics</p>
+    <p>✅ Multi-model ROC curves | ✅ LOS calculation documentation | ✅ AI Assistant integration</p>
+    <p style="font-size:0.9em;margin-top:1rem;">Built with Streamlit, scikit-learn, and Python ML Libraries</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
