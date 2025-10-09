@@ -468,50 +468,91 @@ def explain_in_30_seconds(title: str, bullets: list[str]):
 def expander_title(label: str): return f"🧪 {label}"
 
 # ---- AI Assistant ----
-def ai_assistant_section(tab_name: str, context: str):
-    st.markdown('<div class="ai-assistant-box"><h4>🤖 AI Model Assistant</h4><p>Ask questions about your data, models, or get suggestions for improvement.</p></div>', unsafe_allow_html=True)
-    chat_key = f"chat_{tab_name}"
-    if chat_key not in st.session_state.chat_history:
-        st.session_state.chat_history[chat_key] = []
-    user_question = st.text_input(f"Ask about {tab_name}:", key=f"user_q_{tab_name}",
-                                  placeholder="e.g., What features improve accuracy most? How do I tune ARIMA?")
-    if st.button("Ask AI", key=f"ask_{tab_name}"):
-        if user_question and OPENAI_AVAILABLE:
-            try:
-                model_label = st.session_state.get("INSIGHTS_MODEL", "GPT-3.5")
-                model_name = OPENAI_MODEL_MAP.get(model_label, "gpt-3.5-turbo")
-                prompt = f"""You are a senior data scientist for hospital analytics.
+def ai_assistant_section(tab_name: str, context: str, expanded: bool = False, help_text: str = ""):
+    """AI Assistant for each tab, wrapped in an expander."""
+    title = f"🤖 AI Model Assistant — {tab_name}"
+    with st.expander(title, expanded=expanded):
+        if help_text:
+            st.caption(help_text)
+
+        # (Optional) keep the gradient box inside the expander for flair
+        st.markdown(
+            '<div class="ai-assistant-box"><h4>Ask about your data & models</h4>'
+            '<p>Tips: request feature ideas, debugging help, or insight summaries.</p></div>',
+            unsafe_allow_html=True
+        )
+
+        chat_key = f"chat_{tab_name}"
+        if chat_key not in st.session_state.chat_history:
+            st.session_state.chat_history[chat_key] = []
+
+        user_question = st.text_input(
+            f"Ask about {tab_name}:",
+            key=f"user_q_{tab_name}",
+            placeholder="e.g., How can I improve model accuracy? What features should I add?"
+        )
+
+        if st.button("Ask AI", key=f"ask_{tab_name}"):
+            if user_question and OPENAI_AVAILABLE:
+                with st.spinner("Thinking..."):
+                    try:
+                        model_label = st.session_state.get("INSIGHTS_MODEL", "GPT-4.0")
+                        model_name = OPENAI_MODEL_MAP.get(model_label, "gpt-4")
+
+                        prompt = f"""You are an AI assistant helping with hospital analytics and machine learning.
 Context: {context}
+Tab: {tab_name}
 User role: {st.session_state.USER_ROLE}
-Question: {user_question}
-Give specific, actionable guidance (feature ideas, parameter tuning, evaluation tips, pitfalls)."""
-                if hasattr(OPENAI_CLIENT, "chat"):
-                    resp = OPENAI_CLIENT.chat.completions.create(
-                        model=model_name, temperature=0.7,
-                        messages=[{"role":"system","content":"Helpful ML & analytics coach for healthcare ops."},
-                                  {"role":"user","content":prompt}]
-                    )
-                    answer = resp.choices[0].message.content.strip()
-                else:
-                    resp = OPENAI_CLIENT.ChatCompletion.create(
-                        model=model_name, temperature=0.7,
-                        messages=[{"role":"system","content":"Helpful ML & analytics coach for healthcare ops."},
-                                  {"role":"user","content":prompt}]
-                    )
-                    answer = resp.choices[0].message["content"].strip()
-                st.session_state.chat_history[chat_key].append({"q": user_question, "a": answer})
-            except Exception as e:
-                st.error(f"AI Assistant error: {e}")
-        elif not OPENAI_AVAILABLE:
-            st.warning("AI Assistant requires an OpenAI API key.")
-    if st.session_state.chat_history[chat_key]:
-        st.markdown("### Recent Conversations")
-        for i, chat in enumerate(reversed(st.session_state.chat_history[chat_key][-3:])):
-            with st.expander(f"Q: {chat['q'][:50]}...", expanded=(i == 0)):
-                st.markdown(f"**Question:** {chat['q']}")
-                st.markdown(f"**Answer:** {chat['a']}")
+
+User question: {user_question}
+
+Provide a helpful, actionable answer focused on improving the analysis or model."""
+
+                        if hasattr(OPENAI_CLIENT, "chat"):
+                            resp = OPENAI_CLIENT.chat.completions.create(
+                                model=model_name,
+                                temperature=0.7,
+                                messages=[
+                                    {"role": "system",
+                                     "content": "You are a helpful ML and analytics assistant for hospital operations."},
+                                    {"role": "user", "content": prompt},
+                                ],
+                            )
+                            answer = resp.choices[0].message.content.strip()
+                        else:
+                            resp = OPENAI_CLIENT.ChatCompletion.create(
+                                model=model_name,
+                                temperature=0.7,
+                                messages=[
+                                    {"role": "system",
+                                     "content": "You are a helpful ML and analytics assistant for hospital operations."},
+                                    {"role": "user", "content": prompt},
+                                ],
+                            )
+                            answer = resp.choices[0].message["content"].strip()
+
+                        st.session_state.chat_history[chat_key].append({"q": user_question, "a": answer})
+                    except Exception as e:
+                        st.error(f"AI Assistant error: {e}")
+            elif not OPENAI_AVAILABLE:
+                st.warning("AI Assistant requires OpenAI API key. Please configure it in Streamlit secrets.")
+
+        # Display chat history
+        if st.session_state.chat_history[chat_key]:
+            st.markdown("### Recent Conversations")
+            for i, chat in enumerate(reversed(st.session_state.chat_history[chat_key][-3:])):
+                with st.expander(f"Q: {chat['q'][:50]}...", expanded=(i == 0)):
+                    st.markdown(f"**Question:** {chat['q']}")
+                    st.markdown(f"**Answer:** {chat['a']}")
+
 
 # ---------- Tabs ----------
+def _build_anomaly_matrix(df: pd.DataFrame, features: list[str]) -> pd.DataFrame:
+    if not features:
+        return pd.DataFrame(index=df.index)
+    # Keep index to map anomalies back to filtered_df rows
+    return df[features].dropna()
+
 tabs = st.tabs(["📈 Admissions Forecasting", "💰 Revenue Analytics", "🛏️ Length of Stay Prediction", "📊 Operational KPIs & Simulator"])
 
 # ===================== TAB 1: Admissions Forecasting =====================
@@ -775,8 +816,9 @@ result = forecast
     # AI Assistant for this tab
     st.markdown("---")
     context = f"Admissions forecasting with {len(daily_adm)} days. Models: {', '.join(['Linear Trend','ARIMA','Exponential Smoothing'] + (['Prophet'] if HAS_PROPHET else []))}. Role={st.session_state.USER_ROLE}"
-    ai_assistant_section("Admissions Forecasting", context)
+    ai_assistant_section("Admissions Forecasting", context, expanded=False)
 
+# ===================== TAB 2: Revenue Analytics =====================
 # ===================== TAB 2: Revenue Analytics =====================
 with tabs[1]:
     st.markdown("""<div class="analysis-section"><h3>💰 Revenue Pattern Analysis</h3><p>Detect unusual billing patterns and identify potential revenue optimization opportunities.</p></div>""", unsafe_allow_html=True)
@@ -789,6 +831,7 @@ with tabs[1]:
          "Compare methods by % flagged and plausibility.",
          "Export anomalies for human audit."])
 
+    # ----- Trends + headline metrics
     c1, c2 = st.columns([2, 1])
     with c1:
         st.subheader("💳 Revenue Trends")
@@ -810,6 +853,7 @@ with tabs[1]:
         <div class="metric-card"><h4>Avg Per Patient</h4><h2 style="color:#fbbc04;">${avg_bill:,.0f}</h2></div>
         """, unsafe_allow_html=True)
 
+    # ----- Config row (shared by baseline + custom)
     st.markdown('<div class="config-row"><h4>🔧 Anomaly Detection Settings</h4></div>', unsafe_allow_html=True)
     a1, a2, a3 = st.columns(3)
     with a1:
@@ -821,40 +865,132 @@ with tabs[1]:
             ["billing_amount","age","length_of_stay","admission_month","admission_day_of_week"],
             default=["billing_amount","length_of_stay"])
 
+    # Build X once so both sections can use it
+    X_current = _build_anomaly_matrix(filtered_df, features_for_anomaly)
+
+    # ===== A) ALWAYS-ON CUSTOM MODEL EXPANDER (appears even before baseline) =====
+    st.markdown("---")
+    with st.expander(expander_title("Run Custom Revenue Anomaly Code (unsafe)"), expanded=False):
+        st.caption("Return `{'n_anomalies': int, 'anomaly_indices': [...]} ` OR set `result` to a list of anomaly row indices. You may import numpy/sklearn. Uses your selections above for features and sensitivity.")
+        st.checkbox("I understand the risks and want to run custom code", key="ok_custom_rev_always")
+
+        default_custom_rev = f"""
+# Isolation Forest custom example (uses the X provided in context)
+from sklearn.ensemble import IsolationForest
+if X.shape[0] == 0 or X.shape[1] == 0:
+    # Nothing to analyze
+    result = {{'n_anomalies': 0, 'anomaly_indices': []}}
+else:
+    iso = IsolationForest(contamination={float(sensitivity)}, random_state=42)
+    pred = iso.fit_predict(X)  # X comes from context
+    anomalies = np.where(pred == -1)[0]
+    result = {{'n_anomalies': int(len(anomalies)), 'anomaly_indices': anomalies.tolist()}}
+"""
+        user_code_rev_always = st.text_area("Your function: custom_revenue_anomaly(X)", value=default_custom_rev, height=260, key="revenue_code_edit_always")
+        run_code_rev_always = st.button("Run Custom Revenue Code", key="run_revenue_code_always", type="primary")
+
+        if run_code_rev_always:
+            if not st.session_state.ok_custom_rev_always:
+                st.warning("Please confirm the checkbox above to run custom code.")
+            elif X_current.shape[0] == 0 or X_current.shape[1] == 0:
+                st.warning("Select at least one feature and ensure the data has rows after dropping NAs.")
+            else:
+                with st.spinner("Executing custom anomaly code..."):
+                    # Preserve row index to map back to filtered_df
+                    X = X_current.copy()
+                    context = {'feature_data': filtered_df, 'filtered_df': filtered_df, 'X': X, 'np': np, 'pd': pd}
+                    success, result, error = run_user_code(user_code_rev_always, context)
+                    if not success:
+                        st.error(f"❌ Execution failed:\n{error}")
+                    else:
+                        norm = norm_anomaly_output(result)
+                        idx_local = norm.pop("_indices", [])
+                        if len(idx_local) == 0:
+                            st.info("No anomalies returned by custom code.")
+                        else:
+                            # idx_local are *positional* indices relative to X
+                            X_indices = X.index.to_numpy()
+                            selected_idx = X_indices[np.array(idx_local, dtype=int)]
+                            n = len(selected_idx)
+                            rate = n / max(1, len(X))
+                            avg_amt = float(filtered_df.loc[selected_idx, "billing_amount"].mean()) if "billing_amount" in filtered_df.columns else 0.0
+                            norm.update({"anomalies_detected": n, "anomaly_rate": rate, "avg_anomaly_amount": avg_amt})
+                            register_custom_result("anomaly", norm)
+
+                            st.success(f"Custom anomalies detected: {n} ({rate:.2%}) • Avg anomaly ${avg_amt:,.0f}")
+
+                            # Quick scatter if at least 2 features
+                            if len(features_for_anomaly) >= 2:
+                                flag = np.zeros(len(X), dtype=int)
+                                # Map selected positional ints back to 0..len(X)-1 for coloring
+                                flag[np.array(idx_local, dtype=int)] = 1
+                                fig_custom = px.scatter(x=X[features_for_anomaly[0]], y=X[features_for_anomaly[1]],
+                                                        color=flag, title="Revenue Pattern Analysis — Custom",
+                                                        labels={"color":"Anomaly (1=yes)"})
+                                fig_custom.update_layout(height=480)
+                                st.plotly_chart(fig_custom, use_container_width=True)
+
+                            # AI Summary (Custom) – independent of baseline
+                            ai_custom_rev = llm_insight(
+                                "Revenue Pattern Analysis — Custom Model",
+                                {
+                                    "best_method":"Custom",
+                                    "anomalies_detected": n,
+                                    "anomaly_rate": rate,
+                                    "avg_anomaly_amount": avg_amt,
+                                    "total_revenue": total_revenue,
+                                    "avg_daily_revenue": avg_daily_revenue
+                                },
+                                {"Custom": norm},
+                                ""
+                            )
+                            render_ai_summary(ai_custom_rev, "AI Summary (Custom)")
+
+    # ===== B) Baseline detectors (optional to run) =====
     if st.button("Analyze Revenue Patterns", key="detect_anomalies", type="primary"):
         if features_for_anomaly and detection_methods:
             with st.spinner("Analyzing revenue patterns..."):
-                X = filtered_df[features_for_anomaly].dropna()
+                X = X_current
                 results, anomaly_predictions = {}, {}
 
                 for method in detection_methods:
                     try:
                         if method == "Isolation Forest":
                             iso = IsolationForest(contamination=float(sensitivity), random_state=42)
-                            pred = iso.fit_predict(X)
+                            pred = iso.fit_predict(X) if X.shape[0] and X.shape[1] else np.array([])
                             anomaly_predictions["Isolation Forest"] = pred
-                            n = int((pred == -1).sum())
+                            n = int((pred == -1).sum()) if pred.size else 0
                             rate = n/len(X) if len(X) else 0
                             results["Isolation Forest"] = {"anomalies_detected": n, "anomaly_rate": rate,
                                 "avg_anomaly_amount": float(filtered_df.loc[X.index[pred==-1],"billing_amount"].mean()) if n>0 and "billing_amount" in filtered_df.columns else 0.0}
+
                         elif method == "Statistical Outliers":
-                            z = np.abs((X - X.mean())/X.std(ddof=0)).fillna(0.0)
-                            stat_mask = (z>3).any(axis=1)
-                            n = int(stat_mask.sum()); rate = n/len(X) if len(X) else 0
-                            results["Statistical Outliers"] = {"anomalies_detected": n, "anomaly_rate": rate,
-                                "avg_anomaly_amount": float(filtered_df.loc[X.index[stat_mask],"billing_amount"].mean()) if n>0 and "billing_amount" in filtered_df.columns else 0.0}
-                            anomaly_predictions["Statistical Outliers"] = np.where(stat_mask.values,-1,1)
+                            if X.shape[0] and X.shape[1]:
+                                z = np.abs((X - X.mean())/X.std(ddof=0)).fillna(0.0)
+                                stat_mask = (z>3).any(axis=1)
+                                n = int(stat_mask.sum()); rate = n/len(X) if len(X) else 0
+                                results["Statistical Outliers"] = {"anomalies_detected": n, "anomaly_rate": rate,
+                                    "avg_anomaly_amount": float(filtered_df.loc[X.index[stat_mask],"billing_amount"].mean()) if n>0 and "billing_amount" in filtered_df.columns else 0.0}
+                                anomaly_predictions["Statistical Outliers"] = np.where(stat_mask.values,-1,1)
+                            else:
+                                results["Statistical Outliers"] = {"anomalies_detected": 0, "anomaly_rate": 0.0, "avg_anomaly_amount": 0.0}
+                                anomaly_predictions["Statistical Outliers"] = np.array([])
+
                         elif method == "Ensemble":
-                            iso = IsolationForest(contamination=float(sensitivity), random_state=42)
-                            pred_iso = iso.fit_predict(X)
-                            z = np.abs((X - X.mean())/X.std(ddof=0)).fillna(0.0)
-                            stat_mask = (z>3).any(axis=1)
-                            pred_stat = np.where(stat_mask.values,-1,1)
-                            pred_ens = np.where((pred_iso==-1) & (pred_stat==-1), -1, 1)
-                            anomaly_predictions["Ensemble"] = pred_ens
-                            n = int((pred_ens==-1).sum()); rate = n/len(X) if len(X) else 0
-                            results["Ensemble"] = {"anomalies_detected": n, "anomaly_rate": rate,
-                                "avg_anomaly_amount": float(filtered_df.loc[X.index[pred_ens==-1],"billing_amount"].mean()) if n>0 and "billing_amount" in filtered_df.columns else 0.0}
+                            if X.shape[0] and X.shape[1]:
+                                iso = IsolationForest(contamination=float(sensitivity), random_state=42)
+                                pred_iso = iso.fit_predict(X)
+                                z = np.abs((X - X.mean())/X.std(ddof=0)).fillna(0.0)
+                                stat_mask = (z>3).any(axis=1)
+                                pred_stat = np.where(stat_mask.values,-1,1)
+                                pred_ens = np.where((pred_iso==-1) & (pred_stat==-1), -1, 1)
+                                anomaly_predictions["Ensemble"] = pred_ens
+                                n = int((pred_ens==-1).sum()); rate = n/len(X) if len(X) else 0
+                                results["Ensemble"] = {"anomalies_detected": n, "anomaly_rate": rate,
+                                    "avg_anomaly_amount": float(filtered_df.loc[X.index[pred_ens==-1],"billing_amount"].mean()) if n>0 and "billing_amount" in filtered_df.columns else 0.0}
+                            else:
+                                results["Ensemble"] = {"anomalies_detected": 0, "anomaly_rate": 0.0, "avg_anomaly_amount": 0.0}
+                                anomaly_predictions["Ensemble"] = np.array([])
                     except Exception as e:
                         st.warning(f"{method} failed: {e}")
 
@@ -868,74 +1004,25 @@ with tabs[1]:
                     res_df = res_df.sort_values("distance_from_target").drop("distance_from_target", axis=1)
                     st.dataframe(res_df.style.format({"anomalies_detected":"{:.0f}","anomaly_rate":"{:.2%}","avg_anomaly_amount":"${:,.0f}"}), use_container_width=True)
 
-                    # Immediate AI Summary
+                    # Immediate AI Summary (baseline)
                     best_method = min(results.keys(), key=lambda x: abs(results[x]["anomaly_rate"] - 0.05))
                     det = results[best_method]
                     data_summary_rev = {
-                        "total_revenue": float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0,
-                        "avg_daily_revenue": float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0,
-                        "best_method": best_method, "anomalies_detected": int(det.get("anomalies_detected",0)),
+                        "total_revenue": total_revenue,
+                        "avg_daily_revenue": avg_daily_revenue,
+                        "best_method": best_method,
+                        "anomalies_detected": int(det.get("anomalies_detected",0)),
                         "anomaly_rate": float(det.get("anomaly_rate",0.0)),
                         "custom_present": "Custom" in st.session_state.custom_results.get("anomaly",{})
                     }
                     render_ai_summary(llm_insight("Revenue Pattern Analysis", data_summary_rev, results, ""), "AI Summary")
-
-                    # ---- Custom Anomaly Code (always available after analysis) ----
-                    st.markdown("---")
-                    with st.expander(expander_title("Run Custom Revenue Anomaly Code (unsafe)"), expanded=False):
-                        st.caption("Return `{'n_anomalies': int, 'anomaly_indices': [...]} ` or just set `result` to the list of anomaly row indices. You may import numpy/sklearn.")
-                        st.checkbox("I understand the risks and want to run custom code", key="ok_custom_rev")
-                        generated_code = f"""
-# Isolation Forest custom example
-from sklearn.ensemble import IsolationForest
-iso = IsolationForest(contamination={float(sensitivity)}, random_state=42)
-pred = iso.fit_predict(X)  # X is provided in context
-anomalies = np.where(pred == -1)[0]
-result = {{'n_anomalies': len(anomalies), 'anomaly_indices': anomalies.tolist()}}
-"""
-                        user_code_rev = st.text_area("Your function: custom_revenue_anomaly(X)", value=generated_code, height=260, key="revenue_code_edit_v3")
-                        run_code_rev = st.button("Run Custom Revenue Code", key="run_revenue_code_v3", type="primary")
-                        if run_code_rev:
-                            if not st.session_state.ok_custom_rev:
-                                st.warning("Please confirm the checkbox above to run custom code.")
-                            else:
-                                with st.spinner("Executing custom anomaly code..."):
-                                    context = {'feature_data': filtered_df, 'filtered_df': filtered_df, 'X': X, 'np': np, 'pd': pd}
-                                    success, result, error = run_user_code(user_code_rev, context)
-                                    if not success:
-                                        st.error(f"❌ Execution failed:\n{error}")
-                                    else:
-                                        norm = norm_anomaly_output(result)
-                                        idx = norm.pop("_indices", [])
-                                        if len(idx) == 0:
-                                            st.warning("Custom code ran, but no anomaly indices were returned.")
-                                        else:
-                                            n = len(idx)
-                                            rate = n / max(1, len(X))
-                                            avg_amt = float(filtered_df.loc[X.index[idx], "billing_amount"].mean()) if "billing_amount" in filtered_df.columns else 0.0
-                                            norm.update({"anomalies_detected": n, "anomaly_rate": rate, "avg_anomaly_amount": avg_amt})
-                                            register_custom_result("anomaly", norm)
-                                            st.success(f"Custom anomalies detected: {n} ({rate:.2%}) • Avg anomaly ${avg_amt:,.0f}")
-
-                                            if len(features_for_anomaly) >= 2:
-                                                flag = np.zeros(len(X), dtype=int); flag[idx] = 1
-                                                fig_custom = px.scatter(x=X[features_for_anomaly[0]], y=X[features_for_anomaly[1]],
-                                                                        color=flag, title="Revenue Pattern Analysis — Custom",
-                                                                        labels={"color":"Anomaly (1=yes)"})
-                                                fig_custom.update_layout(height=480)
-                                                st.plotly_chart(fig_custom, use_container_width=True)
-
-                                            ai_custom_rev = llm_insight("Revenue Pattern Analysis — Custom Model",
-                                                                        {"best_method":"Custom","anomalies_detected": n, "anomaly_rate": rate, "avg_anomaly_amount": avg_amt},
-                                                                        {"Custom": norm}, "")
-                                            render_ai_summary(ai_custom_rev, "AI Summary (Custom)")
         else:
             st.warning("Please select at least one feature and one method.")
 
     # AI Assistant
     st.markdown("---")
     context = f"Revenue analytics: ${float(filtered_df['billing_amount'].sum()) if 'billing_amount' in filtered_df.columns else 0:,.0f} total across {len(filtered_df)} records. Role={st.session_state.USER_ROLE}"
-    ai_assistant_section("Revenue Analytics", context)
+    ai_assistant_section("Revenue Analytics", context,  expanded=False)
 
 # ===================== TAB 3: Length of Stay Prediction =====================
 with tabs[2]:
@@ -1143,7 +1230,7 @@ result = {{'mae': float(mean_absolute_error(y_test, y_pred)), 'r2': float(r2_sco
     # AI Assistant
     st.markdown("---")
     context = f"LOS prediction with avg LOS {float(filtered_df['length_of_stay'].mean()) if 'length_of_stay' in filtered_df.columns else 0:.1f} over {len(filtered_df)} patients. Role={st.session_state.USER_ROLE}"
-    ai_assistant_section("Length of Stay", context)
+    ai_assistant_section("Length of Stay", context, expanded=False)
 
 # ===================== TAB 4: Operational KPIs & Simulator =====================
 with tabs[3]:
@@ -1239,7 +1326,7 @@ result = {{
     # AI Assistant
     st.markdown("---")
     context = f"Operational KPIs + staffing what-if. Recent mean admissions={recent_mean:.1f}, ratios D/N={pts_per_day_nurse}/{pts_per_night_nurse}. Role={st.session_state.USER_ROLE}"
-    ai_assistant_section("Operational KPIs", context)
+    ai_assistant_section("Operational KPIs", context,  expanded=False
 
 # ===================== Decision Log =====================
 st.markdown("---")
