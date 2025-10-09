@@ -1,6 +1,6 @@
-# I'll write the updated Streamlit app to a file so you can download and run it.
-code = r'''# ValueCare Predict & Plan Studio — Advanced AI Predictive Engine
-# (Fully functional, drop-in replacement for your current file)
+
+#code = r'''# ValueCare Predict & Plan Studio — Advanced AI Predictive Engine
+
 
 import os
 import io
