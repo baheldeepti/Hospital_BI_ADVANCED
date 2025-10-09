@@ -1809,8 +1809,3 @@ if st.session_state.decision_log:
             mime="text/csv",
             type="secondary",
         )
-'''
-with open('/mnt/data/valuecare_predict_plan_studio.py', 'w', encoding='utf-8') as f:
-    f.write(code)
-
-print("Wrote /mnt/data/valuecare_predict_plan_studio.py successfully.")
