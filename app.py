@@ -563,7 +563,7 @@ def _build_anomaly_matrix(df: pd.DataFrame, features: list[str]) -> pd.DataFrame
     # Keep index to map anomalies back to filtered_df rows
     return df[features].dropna()
 
-tabs = st.tabs(["📈 Admissions Forecasting", "💰 Revenue Analytics", "🛏️ Length of Stay Prediction", "📊 Operational KPIs & Simulator"])
+tabs = st.tabs(["📈 Admissions Forecasting", "💰 Revenue Analytics", "🛏️ Length of Stay Prediction"])
 
 # ===================== TAB 1: Admissions Forecasting =====================
 with tabs[0]:
@@ -831,64 +831,235 @@ result = forecast
 # ===================== TAB 2: Revenue Analytics =====================
 # ===================== TAB 2: Revenue Analytics =====================
 with tabs[1]:
-    st.markdown("""<div class="analysis-section"><h3>💰 Revenue Pattern Analysis</h3><p>Detect unusual billing patterns and identify potential revenue optimization opportunities.</p></div>""", unsafe_allow_html=True)
+    st.markdown(
+        """<div class="analysis-section"><h3>💰 Revenue Pattern Analysis</h3>
+        <p>Detect unusual billing patterns and identify potential revenue optimization opportunities.</p></div>""",
+        unsafe_allow_html=True,
+    )
     with st.expander("ℹ️ Model Primer: Revenue Anomaly Detection", expanded=False):
-        st.markdown("""- **Isolation Forest**: Unsupervised outlier detection.\n- **Statistical Outliers (z>3)**: Transparent rule.\n- **Ensemble**: Cross-flag both to reduce false positives.""")
+        st.markdown(
+            """- **Isolation Forest**: Unsupervised outlier detection.
+- **Statistical Outliers (z>3)**: Transparent rule.
+- **Ensemble**: Cross-flag both to reduce false positives."""
+        )
 
-    explain_in_30_seconds("Finding odd revenue days/encounters",
-        ["Build a feature table (billing, LOS, weekday, etc.).",
-         "Run unsupervised detectors to flag unlikely points.",
-         "Compare methods by % flagged and plausibility.",
-         "Export anomalies for human audit."])
+    explain_in_30_seconds(
+        "Finding odd revenue days/encounters",
+        [
+            "Build a feature table (billing, LOS, weekday, etc.).",
+            "Run unsupervised detectors to flag unlikely points.",
+            "Compare methods by % flagged and plausibility.",
+            "Export anomalies for human audit.",
+        ],
+    )
 
     # ----- Trends + headline metrics
     c1, c2 = st.columns([2, 1])
     with c1:
         st.subheader("💳 Revenue Trends")
-        daily_rev = filtered_df.groupby(filtered_df["date_of_admission"].dt.date)["billing_amount"].sum().reset_index()
-        daily_rev.columns = ["date","revenue"]
+        daily_rev = (
+            filtered_df.groupby(filtered_df["date_of_admission"].dt.date)["billing_amount"]
+            .sum()
+            .reset_index()
+        )
+        daily_rev.columns = ["date", "revenue"]
         st.session_state["_daily_rev_for_summary"] = daily_rev
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=daily_rev["date"], y=daily_rev["revenue"], mode="lines+markers", name="Daily Revenue", line=dict(width=2)))
-        fig.update_layout(title="Daily Hospital Revenue", xaxis_title="Date", yaxis_title="Revenue ($)", height=400)
+        fig.add_trace(
+            go.Scatter(
+                x=daily_rev["date"],
+                y=daily_rev["revenue"],
+                mode="lines+markers",
+                name="Daily Revenue",
+                line=dict(width=2),
+            )
+        )
+        fig.update_layout(
+            title="Daily Hospital Revenue",
+            xaxis_title="Date",
+            yaxis_title="Revenue ($)",
+            height=400,
+        )
         st.plotly_chart(fig, use_container_width=True)
     with c2:
         st.subheader("💰 Revenue Metrics")
-        total_revenue = float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0
+        total_revenue = (
+            float(filtered_df["billing_amount"].sum())
+            if "billing_amount" in filtered_df.columns
+            else 0.0
+        )
         avg_daily_revenue = float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0
-        avg_bill = float(filtered_df["billing_amount"].mean()) if "billing_amount" in filtered_df.columns else 0.0
-        st.markdown(f"""
+        avg_bill = (
+            float(filtered_df["billing_amount"].mean())
+            if "billing_amount" in filtered_df.columns
+            else 0.0
+        )
+        st.markdown(
+            f"""
         <div class="metric-card"><h4>Total Revenue</h4><h2 style="color:#34a853;">${total_revenue:,.0f}</h2></div>
         <div class="metric-card"><h4>Daily Average</h4><h2 style="color:#4285f4;">${avg_daily_revenue:,.0f}</h2></div>
         <div class="metric-card"><h4>Avg Per Patient</h4><h2 style="color:#fbbc04;">${avg_bill:,.0f}</h2></div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     # ----- Config row (shared by baseline + custom)
     st.markdown('<div class="config-row"><h4>🔧 Anomaly Detection Settings</h4></div>', unsafe_allow_html=True)
     a1, a2, a3 = st.columns(3)
     with a1:
-        detection_methods = st.multiselect("Detection Methods", ["Isolation Forest","Statistical Outliers","Ensemble"], default=["Isolation Forest"])
+        detection_methods = st.multiselect(
+            "Detection Methods",
+            ["Isolation Forest", "Statistical Outliers", "Ensemble"],
+            default=["Isolation Forest"],
+        )
     with a2:
         sensitivity = st.slider("Sensitivity (contamination)", 0.01, 0.10, 0.05, 0.01)
     with a3:
-        features_for_anomaly = st.multiselect("Analysis Features",
-            ["billing_amount","age","length_of_stay","admission_month","admission_day_of_week"],
-            default=["billing_amount","length_of_stay"])
+        features_for_anomaly = st.multiselect(
+            "Analysis Features",
+            ["billing_amount", "age", "length_of_stay", "admission_month", "admission_day_of_week"],
+            default=["billing_amount", "length_of_stay"],
+        )
 
-    # Build X once so both sections can use it
-    X_current = _build_anomaly_matrix(filtered_df, features_for_anomaly)
+    # Build X once so both sections can use it (preserve index for mapping back)
+    X_current = (
+        filtered_df[features_for_anomaly].dropna()
+        if features_for_anomaly
+        else filtered_df.iloc[0:0]
+    )
 
-    # ===== A) ALWAYS-ON CUSTOM MODEL EXPANDER (appears even before baseline) =====
+    # ===== A) Baseline detectors (run first; results show before custom section) =====
+    if st.button("Analyze Revenue Patterns", key="detect_anomalies", type="primary"):
+        if features_for_anomaly and detection_methods:
+            with st.spinner("Analyzing revenue patterns..."):
+                X = X_current
+                results, anomaly_predictions = {}, {}
+
+                for method in detection_methods:
+                    try:
+                        if method == "Isolation Forest":
+                            if X.shape[0] and X.shape[1]:
+                                iso = IsolationForest(contamination=float(sensitivity), random_state=42)
+                                pred = iso.fit_predict(X)
+                                anomaly_predictions["Isolation Forest"] = pred
+                                n = int((pred == -1).sum())
+                                rate = n / len(X) if len(X) else 0
+                                results["Isolation Forest"] = {
+                                    "anomalies_detected": n,
+                                    "anomaly_rate": rate,
+                                    "avg_anomaly_amount": float(
+                                        filtered_df.loc[X.index[pred == -1], "billing_amount"].mean()
+                                    )
+                                    if n > 0 and "billing_amount" in filtered_df.columns
+                                    else 0.0,
+                                }
+                            else:
+                                results["Isolation Forest"] = {
+                                    "anomalies_detected": 0,
+                                    "anomaly_rate": 0.0,
+                                    "avg_anomaly_amount": 0.0,
+                                }
+                                anomaly_predictions["Isolation Forest"] = np.array([])
+
+                        elif method == "Statistical Outliers":
+                            if X.shape[0] and X.shape[1]:
+                                z = np.abs((X - X.mean()) / X.std(ddof=0)).fillna(0.0)
+                                stat_mask = (z > 3).any(axis=1)
+                                n = int(stat_mask.sum())
+                                rate = n / len(X) if len(X) else 0
+                                results["Statistical Outliers"] = {
+                                    "anomalies_detected": n,
+                                    "anomaly_rate": rate,
+                                    "avg_anomaly_amount": float(
+                                        filtered_df.loc[X.index[stat_mask], "billing_amount"].mean()
+                                    )
+                                    if n > 0 and "billing_amount" in filtered_df.columns
+                                    else 0.0,
+                                }
+                                anomaly_predictions["Statistical Outliers"] = np.where(stat_mask.values, -1, 1)
+                            else:
+                                results["Statistical Outliers"] = {
+                                    "anomalies_detected": 0,
+                                    "anomaly_rate": 0.0,
+                                    "avg_anomaly_amount": 0.0,
+                                }
+                                anomaly_predictions["Statistical Outliers"] = np.array([])
+
+                        elif method == "Ensemble":
+                            if X.shape[0] and X.shape[1]:
+                                iso = IsolationForest(contamination=float(sensitivity), random_state=42)
+                                pred_iso = iso.fit_predict(X)
+                                z = np.abs((X - X.mean()) / X.std(ddof=0)).fillna(0.0)
+                                stat_mask = (z > 3).any(axis=1)
+                                pred_stat = np.where(stat_mask.values, -1, 1)
+                                pred_ens = np.where((pred_iso == -1) & (pred_stat == -1), -1, 1)
+                                anomaly_predictions["Ensemble"] = pred_ens
+                                n = int((pred_ens == -1).sum())
+                                rate = n / len(X) if len(X) else 0
+                                results["Ensemble"] = {
+                                    "anomalies_detected": n,
+                                    "anomaly_rate": rate,
+                                    "avg_anomaly_amount": float(
+                                        filtered_df.loc[X.index[pred_ens == -1], "billing_amount"].mean()
+                                    )
+                                    if n > 0 and "billing_amount" in filtered_df.columns
+                                    else 0.0,
+                                }
+                            else:
+                                results["Ensemble"] = {
+                                    "anomalies_detected": 0,
+                                    "anomaly_rate": 0.0,
+                                    "avg_anomaly_amount": 0.0,
+                                }
+                                anomaly_predictions["Ensemble"] = np.array([])
+                    except Exception as e:
+                        st.warning(f"{method} failed: {e}")
+
+                st.session_state.model_results["anomaly"] = results
+                st.session_state.trained_models["anomaly"] = {"predictions": anomaly_predictions, "X": X}
+
+                if results:
+                    st.success("✅ Revenue analysis completed!")
+                    res_df = pd.DataFrame(results).T
+                    res_df["distance_from_target"] = np.abs(res_df["anomaly_rate"] - 0.05)
+                    res_df = res_df.sort_values("distance_from_target").drop("distance_from_target", axis=1)
+                    st.dataframe(
+                        res_df.style.format(
+                            {"anomalies_detected": "{:.0f}", "anomaly_rate": "{:.2%}", "avg_anomaly_amount": "${:,.0f}"}
+                        ),
+                        use_container_width=True,
+                    )
+
+                    # Immediate AI Summary (baseline)
+                    best_method = min(results.keys(), key=lambda x: abs(results[x]["anomaly_rate"] - 0.05))
+                    det = results[best_method]
+                    data_summary_rev = {
+                        "total_revenue": total_revenue,
+                        "avg_daily_revenue": avg_daily_revenue,
+                        "best_method": best_method,
+                        "anomalies_detected": int(det.get("anomalies_detected", 0)),
+                        "anomaly_rate": float(det.get("anomaly_rate", 0.0)),
+                        "custom_present": "Custom" in st.session_state.custom_results.get("anomaly", {}),
+                    }
+                    render_ai_summary(
+                        llm_insight("Revenue Pattern Analysis", data_summary_rev, results, ""), "AI Summary"
+                    )
+        else:
+            st.warning("Please select at least one feature and one method.")
+
+    # ===== B) ALWAYS-ON CUSTOM MODEL EXPANDER (placed AFTER baseline, still always visible) =====
     st.markdown("---")
     with st.expander(expander_title("Run Custom Revenue Anomaly Code (unsafe)"), expanded=False):
-        st.caption("Return `{'n_anomalies': int, 'anomaly_indices': [...]} ` OR set `result` to a list of anomaly row indices. You may import numpy/sklearn. Uses your selections above for features and sensitivity.")
+        st.caption(
+            "Return `{'n_anomalies': int, 'anomaly_indices': [...]} ` OR set `result` to a list of anomaly row indices. "
+            "You may import numpy/sklearn. Uses your selections above for features and sensitivity."
+        )
         st.checkbox("I understand the risks and want to run custom code", key="ok_custom_rev_always")
 
         default_custom_rev = f"""
-# Isolation Forest custom example (uses the X provided in context)
+# Isolation Forest custom example (uses X provided in context)
 from sklearn.ensemble import IsolationForest
 if X.shape[0] == 0 or X.shape[1] == 0:
-    # Nothing to analyze
     result = {{'n_anomalies': 0, 'anomaly_indices': []}}
 else:
     iso = IsolationForest(contamination={float(sensitivity)}, random_state=42)
@@ -896,7 +1067,12 @@ else:
     anomalies = np.where(pred == -1)[0]
     result = {{'n_anomalies': int(len(anomalies)), 'anomaly_indices': anomalies.tolist()}}
 """
-        user_code_rev_always = st.text_area("Your function: custom_revenue_anomaly(X)", value=default_custom_rev, height=260, key="revenue_code_edit_always")
+        user_code_rev_always = st.text_area(
+            "Your function: custom_revenue_anomaly(X)",
+            value=default_custom_rev,
+            height=260,
+            key="revenue_code_edit_always",
+        )
         run_code_rev_always = st.button("Run Custom Revenue Code", key="run_revenue_code_always", type="primary")
 
         if run_code_rev_always:
@@ -908,7 +1084,7 @@ else:
                 with st.spinner("Executing custom anomaly code..."):
                     # Preserve row index to map back to filtered_df
                     X = X_current.copy()
-                    context = {'feature_data': filtered_df, 'filtered_df': filtered_df, 'X': X, 'np': np, 'pd': pd}
+                    context = {"feature_data": filtered_df, "filtered_df": filtered_df, "X": X, "np": np, "pd": pd}
                     success, result, error = run_user_code(user_code_rev_always, context)
                     if not success:
                         st.error(f"❌ Execution failed:\n{error}")
@@ -923,8 +1099,18 @@ else:
                             selected_idx = X_indices[np.array(idx_local, dtype=int)]
                             n = len(selected_idx)
                             rate = n / max(1, len(X))
-                            avg_amt = float(filtered_df.loc[selected_idx, "billing_amount"].mean()) if "billing_amount" in filtered_df.columns else 0.0
-                            norm.update({"anomalies_detected": n, "anomaly_rate": rate, "avg_anomaly_amount": avg_amt})
+                            avg_amt = (
+                                float(filtered_df.loc[selected_idx, "billing_amount"].mean())
+                                if "billing_amount" in filtered_df.columns
+                                else 0.0
+                            )
+                            norm.update(
+                                {
+                                    "anomalies_detected": n,
+                                    "anomaly_rate": rate,
+                                    "avg_anomaly_amount": avg_amt,
+                                }
+                            )
                             register_custom_result("anomaly", norm)
 
                             st.success(f"Custom anomalies detected: {n} ({rate:.2%}) • Avg anomaly ${avg_amt:,.0f}")
@@ -934,313 +1120,486 @@ else:
                                 flag = np.zeros(len(X), dtype=int)
                                 # Map selected positional ints back to 0..len(X)-1 for coloring
                                 flag[np.array(idx_local, dtype=int)] = 1
-                                fig_custom = px.scatter(x=X[features_for_anomaly[0]], y=X[features_for_anomaly[1]],
-                                                        color=flag, title="Revenue Pattern Analysis — Custom",
-                                                        labels={"color":"Anomaly (1=yes)"})
+                                fig_custom = px.scatter(
+                                    x=X[features_for_anomaly[0]],
+                                    y=X[features_for_anomaly[1]],
+                                    color=flag,
+                                    title="Revenue Pattern Analysis — Custom",
+                                    labels={"color": "Anomaly (1=yes)"},
+                                )
                                 fig_custom.update_layout(height=480)
                                 st.plotly_chart(fig_custom, use_container_width=True)
 
-                            # AI Summary (Custom) – independent of baseline
+                            # AI Summary (Custom)
                             ai_custom_rev = llm_insight(
                                 "Revenue Pattern Analysis — Custom Model",
                                 {
-                                    "best_method":"Custom",
+                                    "best_method": "Custom",
                                     "anomalies_detected": n,
                                     "anomaly_rate": rate,
                                     "avg_anomaly_amount": avg_amt,
                                     "total_revenue": total_revenue,
-                                    "avg_daily_revenue": avg_daily_revenue
+                                    "avg_daily_revenue": avg_daily_revenue,
                                 },
                                 {"Custom": norm},
-                                ""
+                                "",
                             )
                             render_ai_summary(ai_custom_rev, "AI Summary (Custom)")
-
-    # ===== B) Baseline detectors (optional to run) =====
-    if st.button("Analyze Revenue Patterns", key="detect_anomalies", type="primary"):
-        if features_for_anomaly and detection_methods:
-            with st.spinner("Analyzing revenue patterns..."):
-                X = X_current
-                results, anomaly_predictions = {}, {}
-
-                for method in detection_methods:
-                    try:
-                        if method == "Isolation Forest":
-                            iso = IsolationForest(contamination=float(sensitivity), random_state=42)
-                            pred = iso.fit_predict(X) if X.shape[0] and X.shape[1] else np.array([])
-                            anomaly_predictions["Isolation Forest"] = pred
-                            n = int((pred == -1).sum()) if pred.size else 0
-                            rate = n/len(X) if len(X) else 0
-                            results["Isolation Forest"] = {"anomalies_detected": n, "anomaly_rate": rate,
-                                "avg_anomaly_amount": float(filtered_df.loc[X.index[pred==-1],"billing_amount"].mean()) if n>0 and "billing_amount" in filtered_df.columns else 0.0}
-
-                        elif method == "Statistical Outliers":
-                            if X.shape[0] and X.shape[1]:
-                                z = np.abs((X - X.mean())/X.std(ddof=0)).fillna(0.0)
-                                stat_mask = (z>3).any(axis=1)
-                                n = int(stat_mask.sum()); rate = n/len(X) if len(X) else 0
-                                results["Statistical Outliers"] = {"anomalies_detected": n, "anomaly_rate": rate,
-                                    "avg_anomaly_amount": float(filtered_df.loc[X.index[stat_mask],"billing_amount"].mean()) if n>0 and "billing_amount" in filtered_df.columns else 0.0}
-                                anomaly_predictions["Statistical Outliers"] = np.where(stat_mask.values,-1,1)
-                            else:
-                                results["Statistical Outliers"] = {"anomalies_detected": 0, "anomaly_rate": 0.0, "avg_anomaly_amount": 0.0}
-                                anomaly_predictions["Statistical Outliers"] = np.array([])
-
-                        elif method == "Ensemble":
-                            if X.shape[0] and X.shape[1]:
-                                iso = IsolationForest(contamination=float(sensitivity), random_state=42)
-                                pred_iso = iso.fit_predict(X)
-                                z = np.abs((X - X.mean())/X.std(ddof=0)).fillna(0.0)
-                                stat_mask = (z>3).any(axis=1)
-                                pred_stat = np.where(stat_mask.values,-1,1)
-                                pred_ens = np.where((pred_iso==-1) & (pred_stat==-1), -1, 1)
-                                anomaly_predictions["Ensemble"] = pred_ens
-                                n = int((pred_ens==-1).sum()); rate = n/len(X) if len(X) else 0
-                                results["Ensemble"] = {"anomalies_detected": n, "anomaly_rate": rate,
-                                    "avg_anomaly_amount": float(filtered_df.loc[X.index[pred_ens==-1],"billing_amount"].mean()) if n>0 and "billing_amount" in filtered_df.columns else 0.0}
-                            else:
-                                results["Ensemble"] = {"anomalies_detected": 0, "anomaly_rate": 0.0, "avg_anomaly_amount": 0.0}
-                                anomaly_predictions["Ensemble"] = np.array([])
-                    except Exception as e:
-                        st.warning(f"{method} failed: {e}")
-
-                st.session_state.model_results["anomaly"] = results
-                st.session_state.trained_models["anomaly"] = {"predictions": anomaly_predictions, "X": X}
-
-                if results:
-                    st.success("✅ Revenue analysis completed!")
-                    res_df = pd.DataFrame(results).T
-                    res_df["distance_from_target"] = np.abs(res_df["anomaly_rate"] - 0.05)
-                    res_df = res_df.sort_values("distance_from_target").drop("distance_from_target", axis=1)
-                    st.dataframe(res_df.style.format({"anomalies_detected":"{:.0f}","anomaly_rate":"{:.2%}","avg_anomaly_amount":"${:,.0f}"}), use_container_width=True)
-
-                    # Immediate AI Summary (baseline)
-                    best_method = min(results.keys(), key=lambda x: abs(results[x]["anomaly_rate"] - 0.05))
-                    det = results[best_method]
-                    data_summary_rev = {
-                        "total_revenue": total_revenue,
-                        "avg_daily_revenue": avg_daily_revenue,
-                        "best_method": best_method,
-                        "anomalies_detected": int(det.get("anomalies_detected",0)),
-                        "anomaly_rate": float(det.get("anomaly_rate",0.0)),
-                        "custom_present": "Custom" in st.session_state.custom_results.get("anomaly",{})
-                    }
-                    render_ai_summary(llm_insight("Revenue Pattern Analysis", data_summary_rev, results, ""), "AI Summary")
-        else:
-            st.warning("Please select at least one feature and one method.")
 
     # AI Assistant
     st.markdown("---")
     context = f"Revenue analytics: ${float(filtered_df['billing_amount'].sum()) if 'billing_amount' in filtered_df.columns else 0:,.0f} total across {len(filtered_df)} records. Role={st.session_state.USER_ROLE}"
-    ai_assistant_section("Revenue Analytics", context,  expanded=False)
+    ai_assistant_section("Revenue Analytics", context)
 
 # ===================== TAB 3: Length of Stay Prediction =====================
 with tabs[2]:
-    st.markdown("""<div class="analysis-section"><h3>🛏️ Length of Stay Prediction</h3><p>Predict stay duration to optimize bed management and discharge planning.</p></div>""", unsafe_allow_html=True)
-    st.markdown("""
-    ### 📋 How Length of Stay (LOS) is Calculated
-    **LOS in Days:** `Discharge Date - Admission Date` (days)
-    **Categories:** Short (0–3), Medium (4–7), Long (8–14), Extended (15+)
-    """)
+    st.markdown(
+        """<div class="analysis-section"><h3>🛏️ Length of Stay Prediction</h3>
+        <p>Predict stay duration to optimize bed management and discharge planning.</p></div>""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        ### 📋 How Length of Stay (LOS) is Calculated
+        **LOS in Days:** `Discharge Date - Admission Date` (days)  
+        **Categories:** Short (0–3), Medium (4–7), Long (8–14), Extended (15+)
+        """
+    )
 
     with st.expander("ℹ️ Model Primer: LOS", expanded=False):
-        st.markdown("""- **Classification:** Random Forest, Logistic Regression, SVM, XGBoost (if installed).\n- **Regression:** Random Forest Regressor, Linear Regression, SVR, XGBoost Regressor (if installed).""")
+        st.markdown(
+            """- **Classification:** Random Forest, Logistic Regression, SVM, XGBoost (if installed).
+- **Regression:** Random Forest Regressor, Linear Regression, SVR, XGBoost Regressor (if installed)."""
+        )
 
-    explain_in_30_seconds("Predicting length of stay",
-        ["Create labels: days or categories.",
-         "Train pipelines with scaling + encoding.",
-         "Compare by Accuracy (cls) or R² (reg).",
-         "Tune discharge pathways from top errors."])
+    explain_in_30_seconds(
+        "Predicting length of stay",
+        [
+            "Create labels: days or categories.",
+            "Train pipelines with scaling + encoding.",
+            "Compare by Accuracy (cls) or R² (reg).",
+            "Tune discharge pathways from top errors.",
+        ],
+    )
 
     if "length_of_stay" not in filtered_df.columns:
         st.error("Length of stay data not available.")
     else:
+        # ---- Distribution & quick metrics
         c1, c2 = st.columns([2, 1])
         with c1:
             st.subheader("📊 LOS Distribution")
-            fig = px.histogram(filtered_df, x="length_of_stay", nbins=30, title="Distribution of Length of Stay")
-            fig.update_layout(height=400, xaxis_title="Length of Stay (days)", yaxis_title="Patients"); st.plotly_chart(fig, use_container_width=True)
+            fig = px.histogram(
+                filtered_df, x="length_of_stay", nbins=30, title="Distribution of Length of Stay"
+            )
+            fig.update_layout(height=400, xaxis_title="Length of Stay (days)", yaxis_title="Patients")
+            st.plotly_chart(fig, use_container_width=True)
         with c2:
             st.subheader("🏥 LOS Metrics")
-            avg_los = float(filtered_df["length_of_stay"].mean()); median_los = float(filtered_df["length_of_stay"].median()); max_los = float(filtered_df["length_of_stay"].max())
+            avg_los = float(filtered_df["length_of_stay"].mean())
+            median_los = float(filtered_df["length_of_stay"].median())
+            max_los = float(filtered_df["length_of_stay"].max())
             st.session_state["los_avg_los"] = avg_los
-            st.markdown(f"""
-            <div class="metric-card"><h4>Average LOS</h4><h2 style="color:#4285f4;">{avg_los:.1f} days</h2></div>
-            <div class="metric-card"><h4>Median LOS</h4><h2 style="color:#34a853;">{median_los:.1f} days</h2></div>
-            <div class="metric-card"><h4>Maximum LOS</h4><h2 style="color:#ea4335;">{max_los:.0f} days</h2></div>
-            """, unsafe_allow_html=True)
+            metric_html = (
+                f"<div class='metric-card'><h4>Average LOS</h4><h2 style='color:#4285f4;'>{avg_los:.1f} days</h2></div>"
+                f"<div class='metric-card'><h4>Median LOS</h4><h2 style='color:#34a853;'>{median_los:.1f} days</h2></div>"
+                f"<div class='metric-card'><h4>Maximum LOS</h4><h2 style='color:#ea4335;'>{max_los:.0f} days</h2></div>"
+            )
+            st.markdown(metric_html, unsafe_allow_html=True)
 
+        # ---- Training controls
         st.markdown('<div class="config-row"><h4>🔧 Prediction Model Setup</h4></div>', unsafe_allow_html=True)
-        available_features = [c for c in filtered_df.columns if c not in ["length_of_stay","los_category","date_of_admission","discharge_date"]]
+
+        available_features = [
+            c
+            for c in filtered_df.columns
+            if c not in ["length_of_stay", "los_category", "date_of_admission", "discharge_date"]
+        ]
+
         s1, s2 = st.columns(2)
         with s1:
-            selected_features = st.multiselect("Select Prediction Features", available_features,
-                                               default=[f for f in ["age","medical_condition","admission_type","hospital"] if f in available_features])
+            selected_features = st.multiselect(
+                "Select Prediction Features",
+                available_features,
+                default=[
+                    f
+                    for f in ["age", "medical_condition", "admission_type", "hospital"]
+                    if f in available_features
+                ],
+            )
         with s2:
-            target_type = st.selectbox("Prediction Target", ["Length of Stay (Days)", "LOS Category (Short/Medium/Long)"])
-            selected_models = st.multiselect("Select Models", ["Random Forest","Logistic Regression","XGBoost","SVM","Linear Regression"], default=["Random Forest","Logistic Regression"])
+            target_type = st.selectbox(
+                "Prediction Target",
+                ["Length of Stay (Days)", "LOS Category (Short/Medium/Long)"],
+            )
+            selected_models = st.multiselect(
+                "Select Models",
+                ["Random Forest", "Logistic Regression", "XGBoost", "SVM", "Linear Regression"],
+                default=["Random Forest", "Logistic Regression"],
+            )
 
+        # Determine classification vs regression immediately (so Custom section can use it too)
+        is_classification = target_type != "Length of Stay (Days)"
+        st.session_state["los_is_classification"] = is_classification
+        st.session_state["los_target_type"] = target_type
+
+        # Prepare a feature dataset that Custom section can also use (if features chosen)
+        feature_data_for_custom = None
+        if selected_features:
+            cols_needed = selected_features + ["length_of_stay", "los_category"]
+            feature_data_for_custom = filtered_df[cols_needed].dropna()
+
+        # ---- Train baseline models
         if st.button("Train Prediction Models", key="train_los", type="primary"):
-            if selected_features:
+            if not selected_features:
+                st.warning("Please select at least one feature for model training.")
+            else:
                 with st.spinner("Training LOS prediction models..."):
-                    feature_data = filtered_df[selected_features + ["length_of_stay","los_category"]].dropna()
-                    if target_type == "Length of Stay (Days)":
-                        target = "length_of_stay"; is_classification = False
-                    else:
-                        target = "los_category"; is_classification = True
-                    st.session_state["los_is_classification"] = is_classification
-                    st.session_state["los_target_type"] = target_type
-
-                    X = feature_data[selected_features]; y = feature_data[target]
-                    numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
-                    categorical_features = X.select_dtypes(include=["object","category"]).columns.tolist()
-                    preprocessor = ColumnTransformer(
-                        transformers=[("num", StandardScaler(), numeric_features), ("cat", OneHotEncoder(drop="first", handle_unknown="ignore"), categorical_features)]
+                    X = feature_data_for_custom[selected_features]
+                    y = (
+                        feature_data_for_custom["los_category"]
+                        if is_classification
+                        else feature_data_for_custom["length_of_stay"]
                     )
 
-                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                    results, models_trained = {}, {}
+                    numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
+                    categorical_features = X.select_dtypes(include=["object", "category"]).columns.tolist()
+                    preprocessor = ColumnTransformer(
+                        transformers=[
+                            ("num", StandardScaler(), numeric_features),
+                            ("cat", OneHotEncoder(drop="first", handle_unknown="ignore"), categorical_features),
+                        ]
+                    )
+
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        X, y, test_size=0.2, random_state=42
+                    )
+
+                    results: Dict[str, Dict[str, float]] = {}
+                    models_trained = {}
 
                     for model_name in selected_models:
                         try:
                             if is_classification:
-                                if model_name == "Random Forest": model = RandomForestClassifier(n_estimators=200, random_state=42)
-                                elif model_name == "Logistic Regression": model = LogisticRegression(max_iter=1000, random_state=42)
-                                elif model_name == "XGBoost" and HAS_XGBOOST: model = xgb.XGBClassifier(random_state=42)
-                                elif model_name == "SVM": model = SVC(probability=True, random_state=42)
-                                else: continue
+                                if model_name == "Random Forest":
+                                    model = RandomForestClassifier(n_estimators=200, random_state=42)
+                                elif model_name == "Logistic Regression":
+                                    model = LogisticRegression(max_iter=1000, random_state=42)
+                                elif model_name == "XGBoost" and HAS_XGBOOST:
+                                    model = xgb.XGBClassifier(random_state=42)
+                                elif model_name == "SVM":
+                                    model = SVC(probability=True, random_state=42)
+                                else:
+                                    continue
                                 step = "classifier"
                             else:
-                                if model_name == "Random Forest": model = RandomForestRegressor(n_estimators=300, random_state=42)
-                                elif model_name == "Linear Regression": model = LinearRegression()
-                                elif model_name == "XGBoost" and HAS_XGBOOST: model = xgb.XGBRegressor(random_state=42)
-                                elif model_name == "SVM": model = SVR()
-                                else: continue
+                                if model_name == "Random Forest":
+                                    model = RandomForestRegressor(n_estimators=300, random_state=42)
+                                elif model_name == "Linear Regression":
+                                    model = LinearRegression()
+                                elif model_name == "XGBoost" and HAS_XGBOOST:
+                                    model = xgb.XGBRegressor(random_state=42)
+                                elif model_name == "SVM":
+                                    model = SVR()
+                                else:
+                                    continue
                                 step = "regressor"
 
                             pipe = Pipeline([("preprocessor", preprocessor), (step, model)])
                             pipe.fit(X_train, y_train)
                             models_trained[model_name] = pipe
-                            y_pred = pipe.predict(X_test)
 
+                            y_pred = pipe.predict(X_test)
                             if is_classification:
                                 acc = accuracy_score(y_test, y_pred)
-                                precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="weighted", zero_division=0)
-                                results[model_name] = {"accuracy": float(acc), "precision": float(precision), "recall": float(recall), "f1_score": float(f1)}
+                                precision, recall, f1, _ = precision_recall_fscore_support(
+                                    y_test, y_pred, average="weighted", zero_division=0
+                                )
+                                results[model_name] = {
+                                    "accuracy": float(acc),
+                                    "precision": float(precision),
+                                    "recall": float(recall),
+                                    "f1_score": float(f1),
+                                }
                             else:
-                                mae = mean_absolute_error(y_test, y_pred); rmse = float(np.sqrt(mean_squared_error(y_test, y_pred))); r2 = r2_score(y_test, y_pred)
-                                results[model_name] = {"mae": float(mae), "rmse": rmse, "r2_score": float(r2)}
+                                mae = mean_absolute_error(y_test, y_pred)
+                                rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+                                r2 = r2_score(y_test, y_pred)
+                                results[model_name] = {
+                                    "mae": float(mae),
+                                    "rmse": rmse,
+                                    "r2_score": float(r2),
+                                }
                         except Exception as e:
                             st.warning(f"Failed to train {model_name}: {e}")
 
                     if results:
+                        # Persist results & test split
                         st.session_state.model_results["los"] = results
-                        st.session_state.trained_models["los"] = {"models": models_trained, "X_test": X_test, "y_test": y_test, "is_classification": is_classification}
+                        st.session_state.trained_models["los"] = {
+                            "models": models_trained,
+                            "X_test": X_test,
+                            "y_test": y_test,
+                            "is_classification": is_classification,
+                        }
                         st.success("✅ LOS prediction models trained successfully!")
 
+                        # Results table
                         res_df = pd.DataFrame(results).T
-                        metric_to_plot = "accuracy" if is_classification else "r2_score"
-                        res_df = res_df.sort_values(metric_to_plot, ascending=not is_classification)
+                        metric_to_sort = "accuracy" if is_classification else "r2_score"
+                        res_df = res_df.sort_values(metric_to_sort, ascending=not is_classification)
                         st.dataframe(res_df.style.format("{:.3f}"), use_container_width=True)
 
-                        figm = go.Figure(data=[go.Bar(x=list(results.keys()),
-                                                      y=[results[m].get(metric_to_plot, 0) for m in results.keys()],
-                                                      text=[f"{results[m].get(metric_to_plot, 0):.3f}" for m in results.keys()], textposition="auto")])
-                        figm.update_layout(title=f"Model Comparison — {metric_to_plot.replace('_',' ').title()}", height=400)
+                        # Bar chart of key metric
+                        key_metric = "accuracy" if is_classification else "r2_score"
+                        figm = go.Figure(
+                            data=[
+                                go.Bar(
+                                    x=list(results.keys()),
+                                    y=[results[m].get(key_metric, 0) for m in results.keys()],
+                                    text=[
+                                        f"{results[m].get(key_metric, 0):.3f}"
+                                        for m in results.keys()
+                                    ],
+                                    textposition="auto",
+                                )
+                            ]
+                        )
+                        figm.update_layout(
+                            title=f"Model Comparison — {key_metric.upper()}",
+                            height=400,
+                            xaxis_title="Model",
+                            yaxis_title=key_metric.upper(),
+                        )
                         st.plotly_chart(figm, use_container_width=True)
 
-                        # Immediate AI Summary
-                        best_model_name = max(results.keys(), key=lambda x: results[x].get("accuracy", 0)) if is_classification else max(results.keys(), key=lambda x: results[x].get("r2_score", -np.inf))
-                        perf = results[best_model_name]["accuracy"] if is_classification else results[best_model_name]["r2_score"]
-                        data_summary_los = {"prediction_type": target_type, "best_model": best_model_name, "performance_metric": float(perf),
-                                            "avg_los": float(st.session_state.get("los_avg_los") or 0.0), "total_patients": len(filtered_df)}
-                        render_ai_summary(llm_insight("Length of Stay Prediction", data_summary_los, results, ""), "AI Summary")
+                        # AI Summary (role-aware)
+                        if is_classification:
+                            best_model_name = max(results.keys(), key=lambda x: results[x].get("accuracy", 0))
+                            perf = results[best_model_name]["accuracy"]
+                        else:
+                            best_model_name = max(results.keys(), key=lambda x: results[x].get("r2_score", -np.inf))
+                            perf = results[best_model_name]["r2_score"]
 
-                        # ---- Custom LOS Code (persistent & runnable) ----
-                        st.markdown("---")
-                        with st.expander(expander_title("Run Custom LOS Code (unsafe)"), expanded=False):
-                            st.caption("Classification: return {'accuracy': float, ...}. Regression: return {'mae': float, 'r2': float, ...}. You may import numpy/sklearn.")
-                            st.checkbox("I understand the risks and want to run custom code", key="ok_custom_los")
+                        data_summary_los = {
+                            "prediction_type": target_type,
+                            "best_model": best_model_name,
+                            "performance_metric": float(perf),
+                            "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
+                            "total_patients": len(filtered_df),
+                        }
+                        insights_text = llm_insight(
+                            "Length of Stay Prediction", data_summary_los, results, ""
+                        )
+                        render_ai_summary(insights_text, "AI Summary")
+                    else:
+                        st.error("All models failed to train. Check features & data quality.")
 
-                            if is_classification:
-                                generated_code = f"""
+        # ---- Custom LOS Model (ALWAYS visible and comes after baseline results)
+        st.markdown("---")
+        with st.expander(expander_title("Run Custom LOS Code (unsafe)"), expanded=False):
+            st.caption(
+                "Classification: return `{'accuracy': float, 'precision': float, 'recall': float, 'f1': float}` "
+                "or any subset. Regression: return `{'mae': float, 'rmse': float, 'r2': float}`. "
+                "You may import from numpy/sklearn (others are blocked)."
+            )
+            st.checkbox(
+                "I understand the risks and want to run custom code",
+                key="ok_custom_los",
+            )
+
+            # Default templates reflect the chosen target type & selected features
+            if not selected_features:
+                st.info("Pick at least one feature above to enable the custom code template.")
+                default_custom_code = "# Select at least one feature to populate the template."
+            else:
+                if is_classification:
+                    # Template for classification
+                    feature_list_repr = repr(selected_features)
+                    default_custom_code = f"""
 # Random Forest Classifier for LOS Category (custom)
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score
-X = feature_data[{selected_features}]
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+import numpy as np
+
+X = feature_data[{feature_list_repr}]
 y = feature_data['los_category']
+
 num = X.select_dtypes(include=[np.number]).columns.tolist()
 cat = X.select_dtypes(include=['object','category']).columns.tolist()
-pre = ColumnTransformer([('num', StandardScaler(), num), ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), cat)])
+pre = ColumnTransformer([
+    ('num', StandardScaler(), num),
+    ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), cat)
+])
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
 model = RandomForestClassifier(n_estimators=250, random_state=42)
 pipe = Pipeline([('pre', pre), ('clf', model)])
 pipe.fit(X_train, y_train)
+
 y_pred = pipe.predict(X_test)
-result = {{'accuracy': float(accuracy_score(y_test, y_pred))}}
+prec, rec, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='weighted', zero_division=0)
+result = {{
+    'accuracy': float(accuracy_score(y_test, y_pred)),
+    'precision': float(prec),
+    'recall': float(rec),
+    'f1': float(f1)
+}}
 """
-                            else:
-                                generated_code = f"""
+                else:
+                    # Template for regression
+                    feature_list_repr = repr(selected_features)
+                    default_custom_code = f"""
 # Random Forest Regressor for LOS Days (custom)
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import mean_absolute_error, r2_score
-X = feature_data[{selected_features}]
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import numpy as np
+
+X = feature_data[{feature_list_repr}]
 y = feature_data['length_of_stay']
+
 num = X.select_dtypes(include=[np.number]).columns.tolist()
 cat = X.select_dtypes(include=['object','category']).columns.tolist()
-pre = ColumnTransformer([('num', StandardScaler(), num), ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), cat)])
+pre = ColumnTransformer([
+    ('num', StandardScaler(), num),
+    ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), cat)
+])
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
 model = RandomForestRegressor(n_estimators=320, random_state=42)
 pipe = Pipeline([('pre', pre), ('reg', model)])
 pipe.fit(X_train, y_train)
-y_pred = pipe.predict(X_test)
-result = {{'mae': float(mean_absolute_error(y_test, y_pred)), 'r2': float(r2_score(y_test, y_pred))}}
-"""
-                            user_code_los = st.text_area("Your function: custom_los_model(feature_data)", value=generated_code, height=340, key="los_code_edit_v3")
-                            run_code_los = st.button("Run Custom LOS Code", key="run_los_code_v3", type="primary")
-                            if run_code_los:
-                                if not st.session_state.ok_custom_los:
-                                    st.warning("Please confirm the checkbox above to run custom code.")
-                                else:
-                                    with st.spinner("Executing custom LOS code..."):
-                                        context = {'feature_data': feature_data, 'filtered_df': filtered_df, 'np': np, 'pd': pd}
-                                        success, result, error = run_user_code(user_code_los, context)
-                                        if not success:
-                                            st.error(f"❌ Execution failed:\n{error}")
-                                        else:
-                                            norm = norm_los_output(result, is_classification)
-                                            if not norm:
-                                                st.warning("Custom code ran, but expected metrics not found.")
-                                            else:
-                                                register_custom_result("los", norm)
-                                                if is_classification:
-                                                    st.success(f"Custom accuracy: {norm.get('accuracy', 0.0):.3f}")
-                                                else:
-                                                    st.success(f"Custom R²: {norm.get('r2_score', norm.get('r2', 0.0)):.3f} • MAE: {norm.get('mae', 0.0):.2f}")
-                                                ai_custom_los = llm_insight("Length of Stay Prediction — Custom Model",
-                                                    {"prediction_type": target_type, "best_model": "Custom",
-                                                     "performance_metric": norm.get("accuracy", norm.get("r2_score", 0.0)),
-                                                     "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
-                                                     "total_patients": len(filtered_df)},
-                                                    {"Custom": norm}, "")
-                                                render_ai_summary(ai_custom_los, "AI Summary (Custom)")
-                    else:
-                        st.error("All models failed to train. Check features & data quality.")
-            else:
-                st.warning("Please select at least one feature for model training.")
 
-    # AI Assistant
+y_pred = pipe.predict(X_test)
+rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+result = {{
+    'mae': float(mean_absolute_error(y_test, y_pred)),
+    'rmse': rmse,
+    'r2': float(r2_score(y_test, y_pred))
+}}
+"""
+
+            user_code_los = st.text_area(
+                "Your function: custom_los_model(feature_data)",
+                value=default_custom_code,
+                height=340,
+                key="los_code_edit_v3",
+            )
+            run_code_los = st.button(
+                "Run Custom LOS Code", key="run_los_code_v3", type="primary"
+            )
+
+            if run_code_los:
+                if not st.session_state.ok_custom_los:
+                    st.warning("Please confirm the checkbox above to run custom code.")
+                elif feature_data_for_custom is None:
+                    st.warning("Please select at least one feature above to run the custom model.")
+                else:
+                    with st.spinner("Executing custom LOS code..."):
+                        # Provide only what the template expects
+                        context = {
+                            "feature_data": feature_data_for_custom,
+                            "filtered_df": filtered_df,
+                            "np": np,
+                            "pd": pd,
+                        }
+                        success, result, error = run_user_code(user_code_los, context)
+                        if not success:
+                            st.error(f"❌ Execution failed:\n{error}")
+                        else:
+                            # Normalize & register
+                            norm = norm_los_output(result, is_classification)
+                            if not norm:
+                                st.warning(
+                                    "Custom code ran, but expected metrics were not returned."
+                                )
+                            else:
+                                register_custom_result("los", norm)
+
+                                # Display metrics in the same style as baseline table
+                                if is_classification:
+                                    table = pd.DataFrame([norm], index=["Custom"])[
+                                        ["accuracy", "precision", "recall", "f1_score"]
+                                    ]
+                                    table = table.rename(columns={"f1_score": "f1"})
+                                else:
+                                    # accept r2 or r2_score key names
+                                    if "r2_score" not in norm and "r2" in norm:
+                                        norm["r2_score"] = norm["r2"]
+                                    table = pd.DataFrame([norm], index=["Custom"])[
+                                        ["mae", "rmse", "r2_score"]
+                                    ]
+
+                                st.dataframe(
+                                    table.style.format("{:.3f}"),
+                                    use_container_width=True,
+                                )
+
+                                # Bar chart for the key metric
+                                key_metric = "accuracy" if is_classification else "r2_score"
+                                key_val = float(
+                                    norm.get(
+                                        key_metric,
+                                        norm.get("r2", 0.0) if key_metric == "r2_score" else 0.0,
+                                    )
+                                )
+                                figc = go.Figure(
+                                    data=[
+                                        go.Bar(
+                                            x=["Custom"],
+                                            y=[key_val],
+                                            text=[f"{key_val:.3f}"],
+                                            textposition="auto",
+                                        )
+                                    ]
+                                )
+                                figc.update_layout(
+                                    title=f"Custom Model — {key_metric.upper()}",
+                                    height=300,
+                                    xaxis_title="Model",
+                                    yaxis_title=key_metric.upper(),
+                                )
+                                st.plotly_chart(figc, use_container_width=True)
+
+                                # Role-aware AI Summary for Custom
+                                perf_val = (
+                                    norm.get("accuracy", 0.0)
+                                    if is_classification
+                                    else norm.get("r2_score", norm.get("r2", 0.0))
+                                )
+                                ai_custom_text = llm_insight(
+                                    "Length of Stay Prediction — Custom Model",
+                                    {
+                                        "prediction_type": target_type,
+                                        "best_model": "Custom",
+                                        "performance_metric": float(perf_val),
+                                        "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
+                                        "total_patients": len(filtered_df),
+                                    },
+                                    {"Custom": norm},
+                                    "",
+                                )
+                                render_ai_summary(ai_custom_text, "AI Summary (Custom)")
+
+    # ---- AI Assistant for this tab
     st.markdown("---")
-    context = f"LOS prediction with avg LOS {float(filtered_df['length_of_stay'].mean()) if 'length_of_stay' in filtered_df.columns else 0:.1f} over {len(filtered_df)} patients. Role={st.session_state.USER_ROLE}"
-    ai_assistant_section("Length of Stay", context, expanded=False)
+    context = (
+        f"LOS prediction with avg LOS "
+        f"{(float(filtered_df['length_of_stay'].mean()) if 'length_of_stay' in filtered_df.columns else 0):.1f} "
+        f"over {len(filtered_df)} patients. Role={st.session_state.USER_ROLE}. "
+        f"Target type: {target_type}. Selected features: {', '.join(selected_features) if selected_features else 'none'}."
+    )
+    ai_assistant_section("Length of Stay", context)
+
 
 # ===================== TAB 4: Operational KPIs & Simulator =====================
 with tabs[3]:
