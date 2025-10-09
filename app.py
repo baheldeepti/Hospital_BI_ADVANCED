@@ -76,13 +76,12 @@ except Exception:
 OPENAI_AVAILABLE = False
 OPENAI_CLIENT = None
 OPENAI_MODEL_MAP = {
-    "GPT-3.5": "gpt-3.5-turbo",
-    "GPT-4.0": "gpt-4"
+    "GPT-3.5": "gpt-3.5-turbo"
 }
 
 def get_openai_key():
     """Properly retrieve OpenAI API key from Streamlit secrets or environment"""
-    _api_key = None
+    _api_key = st.secrets["OPENAI_API_KEY"]
     try:
         if hasattr(st, 'secrets') and "OPENAI_API_KEY" in st.secrets:
             _api_key = st.secrets["OPENAI_API_KEY"]
