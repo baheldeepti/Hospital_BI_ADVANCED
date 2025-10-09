@@ -34,7 +34,7 @@ from statsmodels.tsa.arima.model import ARIMA
 #from pages.header import add_top_bar
 
 # ---------------- UI Setup ----------------
-add_top_bar(active_page="Predictive Insights")
+#add_top_bar(active_page="Predictive Insights")
 hide_sidebar = """
     <style>
         section[data-testid="stSidebar"] { display: none; }
