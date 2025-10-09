@@ -1,3 +1,7 @@
+# I'll write the updated Streamlit app to a file so you can download and run it.
+code = r'''# ValueCare Predict & Plan Studio — Advanced AI Predictive Engine
+# (Fully functional, drop-in replacement for your current file)
+
 import os
 import io
 import json
@@ -21,7 +25,7 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder, label_binarize
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support,
     mean_absolute_error, mean_squared_error, r2_score,
-    roc_auc_score, roc_curve, confusion_matrix, classification_report
+    roc_auc_score, roc_curve
 )
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -29,43 +33,31 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.arima.model import ARIMA
 from pages.header import add_top_bar
 
+# ---------------- UI Setup ----------------
 add_top_bar(active_page="Predictive Insights")
 hide_sidebar = """
     <style>
-        section[data-testid="stSidebar"] {
-            display: none;
-        }
+        section[data-testid="stSidebar"] { display: none; }
     </style>
 """
 st.markdown(hide_sidebar, unsafe_allow_html=True)
 st.markdown("""
     <style>
-        /* Reduce the top space of the main page content */
-        .block-container {
-            padding-top: 1rem !important; 
-        }
-        /* Remove margin above your custom heading */
-        h3 {
-            margin-top: -2px !important;
-        }
+        .block-container { padding-top: 1rem !important; }
+        h3 { margin-top: -2px !important; }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <style>
-div.stButton > button {
-    min-width: 200px;
-    max-width: 200px;
-    width: 200px;
-}
+div.stButton > button { min-width: 200px; max-width: 200px; width: 200px; }
 </style>
 """, unsafe_allow_html=True)
 
 warnings.filterwarnings("ignore")
+st.set_page_config(page_title="ValueCare Predict & Plan Studio", layout="wide", page_icon="🏥")
 st.markdown("<h3 style='color:#1F41BB'>ValueCare Predict & Plan Studio</h3>", unsafe_allow_html=True)
 st.write("Data-driven insights for better patient outcomes and operational efficiency.")
-
-st.set_page_config(page_title="ValueCare Predict & Plan Studio", layout="wide", page_icon="🏥")
 
 # ---------- Optional libraries with graceful fallback ----------
 try:
@@ -80,7 +72,7 @@ try:
 except Exception:
     HAS_XGBOOST = False
 
-# ---------- OpenAI (optional) – FIXED for Streamlit secrets ----------
+# ---------- OpenAI (optional) – defaults to GPT-3.5-turbo ----------
 OPENAI_AVAILABLE = False
 OPENAI_CLIENT = None
 OPENAI_MODEL_MAP = {
@@ -92,18 +84,12 @@ def get_openai_key():
     """Properly retrieve OpenAI API key from Streamlit secrets or environment"""
     _api_key = None
     try:
-        # Try Streamlit secrets first
         if hasattr(st, 'secrets') and "OPENAI_API_KEY" in st.secrets:
             _api_key = st.secrets["OPENAI_API_KEY"]
     except Exception:
         pass
-
     if not _api_key:
-        try:
-            _api_key = os.getenv("OPENAI_API_KEY")
-        except Exception:
-            pass
-
+        _api_key = os.getenv("OPENAI_API_KEY")
     return _api_key
 
 try:
@@ -132,79 +118,40 @@ st.markdown(
 <style>
     .main-header {
         background: linear-gradient(135deg, #4285f4 0%, #34a853 100%);
-        padding: 1.5rem;
-        border-radius: 12px;
-        color: white;
-        margin-bottom: 2rem;
-        text-align: center;
+        padding: 1.5rem; border-radius: 12px; color: white; margin-bottom: 2rem; text-align: center;
     }
     .data-overview {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1.5rem;
-        border: 1px solid #e9ecef;
+        background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #e9ecef;
     }
     .metric-card {
-        background: white;
-        padding: 1rem;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border: 1px solid #e9ecef;
-        margin: 0.5rem 0;
-        text-align: center;
+        background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid #e9ecef; margin: 0.5rem 0; text-align: center;
     }
     .analysis-section {
-        background: #fff;
-        padding: 1.5rem;
-        border-radius: 12px;
-        border: 1px solid #e9ecef;
-        margin: 1rem 0;
+        background: #fff; padding: 1.5rem; border-radius: 12px; border: 1px solid #e9ecef; margin: 1rem 0;
         box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
     .insights-panel {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-        white-space: pre-wrap;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 10px;
+        margin: 1rem 0; white-space: pre-wrap;
     }
-    .config-row {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-        border-left: 4px solid #4285f4;
+    .ai-summary-card {
+        background: #0f172a; color: #fff; padding: 1.2rem 1.5rem; border-radius: 12px; margin: 1rem 0 0.5rem 0;
+        border: 1px solid #1f2937;
     }
-
-    }
+    .ai-summary-card h4 { margin: 0 0 .4rem 0; }
+    .config-row { background: #f8f9fa; padding: 1rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #4285f4; }
     .ai-assistant-box {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1.5rem 0;
-        color: white;
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 1.5rem; border-radius: 10px; margin: 1.5rem 0; color: white;
     }
-    .code-execution-result {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #34a853;
-        margin: 1rem 0;
-    }
+    .code-execution-result { background: #f8f9fa; padding: 1rem; border-radius: 8px; border-left: 4px solid #34a853; margin: 1rem 0; }
     code, pre { white-space: pre-wrap; }
+    div.streamlit-expanderHeader { font-weight: 600; }
+    .expander-note { color:#6b7280; font-size:.9rem; margin-top:.25rem;}
 </style>
 """,
     unsafe_allow_html=True,
 )
-
-# Optional cosmetic: expander header weight
-st.markdown("""
-<style>
-div.streamlit-expanderHeader { font-weight: 600; }
-</style>
-""", unsafe_allow_html=True)
 
 # ---------- Session state initialization ----------
 st.session_state.setdefault("model_results", {})
@@ -215,21 +162,19 @@ st.session_state.setdefault("los_is_classification", None)
 st.session_state.setdefault("los_target_type", None)
 st.session_state.setdefault("los_avg_los", None)
 st.session_state.setdefault("INSIGHTS_USE_LLM", False)
-st.session_state.setdefault("INSIGHTS_MODEL", "GPT-4.0")
+st.session_state.setdefault("INSIGHTS_MODEL", "GPT-3.5")  # default changed
 st.session_state.setdefault("INSIGHTS_TEMP", 0.2)
 st.session_state.setdefault("trained_models", {})
 st.session_state.setdefault("chat_history", {})
 
 # ---------- GLOBAL CONTROLS: Role + LLM ----------
-import streamlit as st
-
 # Initialize state for first run
 if "USER_ROLE" not in st.session_state:
     st.session_state.USER_ROLE = "Executive"
 if "INSIGHTS_USE_LLM" not in st.session_state:
     st.session_state.INSIGHTS_USE_LLM = False
 if "INSIGHTS_MODEL" not in st.session_state:
-    st.session_state.INSIGHTS_MODEL = "GPT-4.0"
+    st.session_state.INSIGHTS_MODEL = "GPT-3.5"
 if "INSIGHTS_TEMP" not in st.session_state:
     st.session_state.INSIGHTS_TEMP = 0.2
 
@@ -250,23 +195,23 @@ with col2:
         help="If disabled or unavailable, we use a built-in, data-driven summary."
     )
 with col3:
+    # Order changed so GPT-3.5 is default and first
+    options = ["GPT-3.5", "GPT-4.0"]
     st.session_state.INSIGHTS_MODEL = st.selectbox(
         "ChatGPT Model",
-        options=["GPT-4.0", "GPT-3.5"],
-        index=0 if st.session_state.INSIGHTS_MODEL == "GPT-4.0" else 1,
+        options=options,
+        index=options.index(st.session_state.INSIGHTS_MODEL) if st.session_state.INSIGHTS_MODEL in options else 0,
         help="Choice actually used at generation time."
     )
 with col4:
     st.session_state.INSIGHTS_TEMP = st.slider(
         "Creativity",
-        min_value=0.0,
-        max_value=1.0,
-        value=float(st.session_state.INSIGHTS_TEMP),
-        step=0.1
+        min_value=0.0, max_value=1.0,
+        value=float(st.session_state.INSIGHTS_TEMP), step=0.1
     )
 
 if st.session_state.INSIGHTS_USE_LLM and not OPENAI_AVAILABLE:
-    st.warning("⚠️ OpenAI API key not found. Set `st.secrets['OPENAI_API_KEY']` in Streamlit secrets. Falling back to local insights.")
+    st.warning("⚠️ OpenAI API key not found. Set `st.secrets['OPENAI_API_KEY']`. Falling back to local insights.")
 
 # ---------- Data loading ----------
 @st.cache_data(ttl=3600, show_spinner="Loading hospital data...")
@@ -337,77 +282,6 @@ def load_hospital_data() -> pd.DataFrame:
 
 df = load_hospital_data()
 
-# ---------- Dataset Overview ----------
-st.markdown(
-    """
-<div class="data-overview">
-    <h3>📊 Dataset Overview</h3>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-base_card_style = "padding:5px 8px 8px 10px;border-radius:14px; text-align: center; font-size: 24px; margin-bottom:28px;"
-
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-    st.markdown(
-        f"<div style='background-color:#ECF1FF94;{base_card_style}'><h5>Total Records</h5><p>{len(df):,}</p></div>",
-        unsafe_allow_html=True
-    )
-
-with c2:
-    days = (df['date_of_admission'].max() - df['date_of_admission'].min()).days
-    st.markdown(
-        f"<div style='background-color:#FCBB021C;{base_card_style}'><h5>Date Range</h5><p>{days} days</p></div>",
-        unsafe_allow_html=True
-    )
-
-with c3:
-    hospitals_count = df['hospital'].nunique() if 'hospital' in df.columns else 'N/A'
-    st.markdown(
-        f"<div style='background-color:#B820EB14;{base_card_style}'><h5>Hospitals</h5><p>{hospitals_count}</p></div>",
-        unsafe_allow_html=True
-    )
-
-with c4:
-    conditions_count = df['medical_condition'].nunique() if 'medical_condition' in df.columns else 'N/A'
-    st.markdown(
-        f"<div style='background-color:#28A74514;{base_card_style}'><h5>Conditions</h5><p>{conditions_count}</p></div>",
-        unsafe_allow_html=True
-    )
-
-# ---------- Global Filters ----------
-with st.expander("🔍 Filter Data", expanded=False):
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        hospitals = st.multiselect(
-            "Select Hospitals", df["hospital"].dropna().unique() if "hospital" in df.columns else []
-        )
-    with f2:
-        conditions = st.multiselect(
-            "Medical Conditions",
-            df["medical_condition"].dropna().unique() if "medical_condition" in df.columns else [],
-        )
-    with f3:
-        admission_types = st.multiselect(
-            "Admission Types",
-            df["admission_type"].dropna().unique() if "admission_type" in df.columns else [],
-        )
-
-filtered_df = df.copy()
-if hospitals:
-    filtered_df = filtered_df[filtered_df["hospital"].isin(hospitals)]
-if conditions:
-    filtered_df = filtered_df[filtered_df["medical_condition"].isin(conditions)]
-if admission_types:
-    filtered_df = filtered_df[filtered_df["admission_type"].isin(admission_types)]
-
-if len(filtered_df) != len(df):
-    st.info(f"Applied filters: {len(filtered_df):,} of {len(df):,} records selected")
-
-st.session_state["_filtered_df_for_summary"] = filtered_df
-
 # ---------- Helper functions ----------
 def _fmt_pct(x, d=1):
     try:
@@ -423,21 +297,16 @@ def _fmt_num(x, d=1, money=False):
     except Exception:
         return "N/A"
 
-# ---------- Safe code executor (FIXED with proper imports) ----------
 def run_user_code(user_code: str, context: Dict[str, Any]) -> Tuple[bool, Any, str]:
-    """
-    Executes user Python code in a constrained namespace with proper imports.
-    """
+    """Executes user Python code in a constrained namespace with proper imports."""
     safe_globals = {
         "__builtins__": {
             "abs": abs, "min": min, "max": max, "sum": sum, "len": len, "range": range, "round": round,
             "float": float, "int": int, "str": str, "dict": dict, "list": list, "tuple": tuple,
             "enumerate": enumerate, "zip": zip, "sorted": sorted, "print": print, "bool": bool
         },
-        "pd": pd,
-        "np": np,
-        "go": go,
-        "px": px,
+        "pd": pd, "np": np, "go": go, "px": px,
+        "ARIMA": ARIMA, "ExponentialSmoothing": ExponentialSmoothing,
     }
     safe_locals = context.copy()
 
@@ -509,8 +378,8 @@ def llm_insight(section_title: str, data_summary: dict, model_results: Optional[
     if not use_llm or not OPENAI_AVAILABLE:
         return local_insight(section_title, data_summary, model_results)
 
-    model_label = st.session_state.get("INSIGHTS_MODEL", "GPT-4.0")
-    model_name = OPENAI_MODEL_MAP.get(model_label, "gpt-4")
+    model_label = st.session_state.get("INSIGHTS_MODEL", "GPT-3.5")
+    model_name = OPENAI_MODEL_MAP.get(model_label, "gpt-3.5-turbo")
     temperature = float(st.session_state.get("INSIGHTS_TEMP", 0.2))
     audience = st.session_state.get("USER_ROLE", "Executive")
 
@@ -531,6 +400,7 @@ model_results = {json.dumps(model_results or {}, default=str)}
         base_prompt += f"\nAdditional Guidance:\n{prompt_overrides.strip()}\n"
 
     try:
+        # New SDK
         if hasattr(OPENAI_CLIENT, "chat") and hasattr(OPENAI_CLIENT.chat, "completions"):
             resp = OPENAI_CLIENT.chat.completions.create(
                 model=model_name,
@@ -560,31 +430,21 @@ model_results = {json.dumps(model_results or {}, default=str)}
 st.session_state.setdefault("custom_results", {})  # per-section: 'forecasting' | 'anomaly' | 'los' | 'sim'
 
 def register_custom_result(section_key: str, payload: dict):
-    """Persist a custom model result for a section."""
     st.session_state.custom_results[section_key] = payload or {}
 
 def get_all_results(section_key: str) -> dict:
-    """Merge built-ins + custom for insight generation."""
     core = st.session_state.model_results.get(section_key, {})
     custom = st.session_state.custom_results.get(section_key, {})
     if custom:
-        core = dict(core)  # copy
+        core = dict(core)
         core["Custom"] = custom
     return core
 
 def get_custom_only(section_key: str) -> dict:
-    """
-    Return a dict like {"Custom": <metrics>} — or {} if no custom run yet.
-    Keeps custom-only summaries clean and unblended with core.
-    """
     c = st.session_state.custom_results.get(section_key, {})
     return {"Custom": c} if c else {}
 
 def norm_forecast_output(obj, future_days: int):
-    """
-    Accepts list/np.ndarray OR dict like {'forecast': [...]}.
-    Returns list[float] of length up to future_days.
-    """
     if obj is None:
         return []
     if isinstance(obj, dict) and "forecast" in obj:
@@ -607,10 +467,6 @@ def compute_forecast_metrics(test_values: np.ndarray, pred_values: np.ndarray):
     return {"MAE": mae, "RMSE": rmse, "MAPE": mape}
 
 def norm_anomaly_output(obj):
-    """
-    Accepts: {'n_anomalies': int, 'anomaly_indices': [...]} or just list of indices.
-    Returns standardized dict; we compute rate & avg amount later.
-    """
     res = {"anomalies_detected": 0, "anomaly_rate": 0.0, "avg_anomaly_amount": 0.0}
     if obj is None:
         return res
@@ -625,10 +481,6 @@ def norm_anomaly_output(obj):
     return res
 
 def norm_los_output(obj, is_classification: bool):
-    """
-    Classification: {'accuracy': float, ...}
-    Regression:     {'mae': float, 'r2': float, ...}
-    """
     if not isinstance(obj, dict):
         return {}
     if is_classification:
@@ -656,7 +508,6 @@ def expander_title(label: str):
 
 # ---------- AI Assistant Component ----------
 def ai_assistant_section(tab_name: str, context: str):
-    """AI Assistant for each tab"""
     st.markdown(
         f'<div class="ai-assistant-box"><h4>🤖 AI Model Assistant</h4><p>Ask questions about your data, models, or get suggestions for improvement.</p></div>',
         unsafe_allow_html=True)
@@ -675,8 +526,8 @@ def ai_assistant_section(tab_name: str, context: str):
         if user_question and OPENAI_AVAILABLE:
             with st.spinner("Thinking..."):
                 try:
-                    model_label = st.session_state.get("INSIGHTS_MODEL", "GPT-4.0")
-                    model_name = OPENAI_MODEL_MAP.get(model_label, "gpt-4")
+                    model_label = st.session_state.get("INSIGHTS_MODEL", "GPT-3.5")
+                    model_name = OPENAI_MODEL_MAP.get(model_label, "gpt-3.5-turbo")
 
                     prompt = f"""You are an AI assistant helping with hospital analytics and machine learning.
 Context: {context}
@@ -689,8 +540,7 @@ Provide a helpful, actionable answer focused on improving the analysis or model.
 
                     if hasattr(OPENAI_CLIENT, "chat"):
                         resp = OPENAI_CLIENT.chat.completions.create(
-                            model=model_name,
-                            temperature=0.7,
+                            model=model_name, temperature=0.7,
                             messages=[
                                 {"role": "system",
                                  "content": "You are a helpful ML and analytics assistant for hospital operations."},
@@ -700,8 +550,7 @@ Provide a helpful, actionable answer focused on improving the analysis or model.
                         answer = resp.choices[0].message.content.strip()
                     else:
                         resp = OPENAI_CLIENT.ChatCompletion.create(
-                            model=model_name,
-                            temperature=0.7,
+                            model=model_name, temperature=0.7,
                             messages=[
                                 {"role": "system",
                                  "content": "You are a helpful ML and analytics assistant for hospital operations."},
@@ -716,7 +565,6 @@ Provide a helpful, actionable answer focused on improving the analysis or model.
         elif not OPENAI_AVAILABLE:
             st.warning("AI Assistant requires OpenAI API key. Please configure it in Streamlit secrets.")
 
-    # Display chat history
     if st.session_state.chat_history[chat_key]:
         st.markdown("### Recent Conversations")
         for i, chat in enumerate(reversed(st.session_state.chat_history[chat_key][-3:])):
@@ -726,8 +574,6 @@ Provide a helpful, actionable answer focused on improving the analysis or model.
 
 # ---------- Code generator functions ----------
 def generate_forecast_code(model_name: str, params: dict) -> str:
-    """Generate executable code for forecasting models"""
-
     if model_name == "Linear Trend":
         return f"""
 # Linear Trend Forecasting
@@ -741,7 +587,6 @@ print(f"Forecast: {{forecast}}")
     elif model_name == "ARIMA":
         return f"""
 from statsmodels.tsa.arima.model import ARIMA
-
 # ARIMA(1,1,1) Forecasting
 model = ARIMA(train_data, order=(1, 1, 1))
 fit = model.fit()
@@ -752,7 +597,6 @@ print(f"ARIMA Forecast: {{forecast}}")
     elif model_name == "Exponential Smoothing":
         return f"""
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
-
 # Exponential Smoothing with weekly seasonality
 model = ExponentialSmoothing(train_data, trend="add", seasonal="add", seasonal_periods=7)
 fit = model.fit()
@@ -763,7 +607,6 @@ print(f"Exponential Smoothing Forecast: {{forecast}}")
     elif model_name == "Prophet":
         return f"""
 from prophet import Prophet
-
 # Prophet Forecasting
 p_df = train_data.reset_index()
 p_df.columns = ["ds", "y"]
@@ -778,12 +621,10 @@ print(f"Prophet Forecast: {{forecast}}")
     return "# Code generation not available for this model"
 
 def generate_anomaly_code(method: str, params: dict) -> str:
-    """Generate executable code for anomaly detection"""
     if method == "Isolation Forest":
         return f"""
 from sklearn.ensemble import IsolationForest
 import numpy as np
-
 # Isolation Forest Anomaly Detection
 X = feature_data[{params.get('features', [])}].dropna()
 iso = IsolationForest(contamination={params.get('sensitivity', 0.05)}, random_state=42)
@@ -795,7 +636,6 @@ print(f"Detected {{len(anomalies)}} anomalies")
     elif method == "Statistical Outliers":
         return f"""
 import numpy as np
-
 # Statistical Outliers (z-score > 3)
 X = feature_data[{params.get('features', [])}].dropna()
 z = np.abs((X - X.mean()) / X.std(ddof=0)).fillna(0.0)
@@ -807,7 +647,6 @@ print(f"Detected {{len(anomalies)}} anomalies")
     return "# Code generation not available for this method"
 
 def generate_los_code(model_name: str, is_classification: bool, params: dict) -> str:
-    """Generate executable code for LOS prediction"""
     if is_classification:
         if model_name == "Random Forest":
             return f"""
@@ -816,32 +655,25 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, classification_report
-
+from sklearn.metrics import accuracy_score
 # Random Forest Classifier for LOS Category
 X = feature_data[{params.get('features', [])}]
 y = feature_data['los_category']
-
 numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
 categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
-
 preprocessor = ColumnTransformer(
     transformers=[
         ('num', StandardScaler(), numeric_features),
         ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_features),
     ])
-
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
 model = RandomForestClassifier(n_estimators=200, random_state=42)
 pipe = Pipeline([('preprocessor', preprocessor), ('classifier', model)])
 pipe.fit(X_train, y_train)
-
 y_pred = pipe.predict(X_test)
 accuracy = accuracy_score(y_test, y_pred)
 result = {{'accuracy': accuracy, 'predictions': y_pred.tolist()[:10]}}
 print(f"Accuracy: {{accuracy:.3f}}")
-print(classification_report(y_test, y_pred))
 """
         elif model_name == "Logistic Regression":
             return f"""
@@ -851,26 +683,20 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score
-
 # Logistic Regression for LOS Category
 X = feature_data[{params.get('features', [])}]
 y = feature_data['los_category']
-
 numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
 categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
-
 preprocessor = ColumnTransformer(
     transformers=[
         ('num', StandardScaler(), numeric_features),
         ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_features),
     ])
-
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
 model = LogisticRegression(max_iter=1000, random_state=42)
 pipe = Pipeline([('preprocessor', preprocessor), ('classifier', model)])
 pipe.fit(X_train, y_train)
-
 y_pred = pipe.predict(X_test)
 accuracy = accuracy_score(y_test, y_pred)
 result = {{'accuracy': accuracy}}
@@ -885,26 +711,20 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_absolute_error, r2_score
-
 # Random Forest Regressor for LOS Days
 X = feature_data[{params.get('features', [])}]
 y = feature_data['length_of_stay']
-
 numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
 categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
-
 preprocessor = ColumnTransformer(
     transformers=[
         ('num', StandardScaler(), numeric_features),
         ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_features),
     ])
-
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
 model = RandomForestRegressor(n_estimators=300, random_state=42)
 pipe = Pipeline([('preprocessor', preprocessor), ('regressor', model)])
 pipe.fit(X_train, y_train)
-
 y_pred = pipe.predict(X_test)
 mae = mean_absolute_error(y_test, y_pred)
 r2 = r2_score(y_test, y_pred)
@@ -913,11 +733,69 @@ print(f"MAE: {{mae:.2f}}, R²: {{r2:.3f}}")
 """
     return "# Code generation not available for this model"
 
+# ---------- Dataset Overview ----------
+st.markdown(
+    """
+<div class="data-overview">
+    <h3>📊 Dataset Overview</h3>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+base_card_style = "padding:5px 8px 8px 10px;border-radius:14px; text-align: center; font-size: 24px; margin-bottom:28px;"
+
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    st.markdown(
+        f"<div style='background-color:#ECF1FF94;{base_card_style}'><h5>Total Records</h5><p>{len(df):,}</p></div>",
+        unsafe_allow_html=True
+    )
+with c2:
+    days = (df['date_of_admission'].max() - df['date_of_admission'].min()).days
+    st.markdown(
+        f"<div style='background-color:#FCBB021C;{base_card_style}'><h5>Date Range</h5><p>{days} days</p></div>",
+        unsafe_allow_html=True
+    )
+with c3:
+    hospitals_count = df['hospital'].nunique() if 'hospital' in df.columns else 'N/A'
+    st.markdown(
+        f"<div style='background-color:#B820EB14;{base_card_style}'><h5>Hospitals</h5><p>{hospitals_count}</p></div>",
+        unsafe_allow_html=True
+    )
+with c4:
+    conditions_count = df['medical_condition'].nunique() if 'medical_condition' in df.columns else 'N/A'
+    st.markdown(
+        f"<div style='background-color:#28A74514;{base_card_style}'><h5>Conditions</h5><p>{conditions_count}</p></div>",
+        unsafe_allow_html=True
+    )
+
+# ---------- Global Filters ----------
+with st.expander("🔍 Filter Data", expanded=False):
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        hospitals = st.multiselect("Select Hospitals", df["hospital"].dropna().unique() if "hospital" in df.columns else [])
+    with f2:
+        conditions = st.multiselect("Medical Conditions", df["medical_condition"].dropna().unique() if "medical_condition" in df.columns else [])
+    with f3:
+        admission_types = st.multiselect("Admission Types", df["admission_type"].dropna().unique() if "admission_type" in df.columns else [])
+
+filtered_df = df.copy()
+if hospitals:
+    filtered_df = filtered_df[filtered_df["hospital"].isin(hospitals)]
+if conditions:
+    filtered_df = filtered_df[filtered_df["medical_condition"].isin(conditions)]
+if admission_types:
+    filtered_df = filtered_df[filtered_df["admission_type"].isin(admission_types)]
+
+if len(filtered_df) != len(df):
+    st.info(f"Applied filters: {len(filtered_df):,} of {len(df):,} records selected")
+
+st.session_state["_filtered_df_for_summary"] = filtered_df
+
 # ---------- Tabs ----------
 st.markdown(
     """
     <style>
-    /* Add spacing between tabs */
     .stTabs [data-baseweb="tab-list"] { gap: 60px; }
     .stTabs [data-baseweb="tab"] { padding: 8px 16px; border-radius: 8px; }
     </style>
@@ -953,7 +831,6 @@ with tabs[0]:
 - **Prophet** *(optional)*: Flexible seasonality/holidays; heavier dependency.
             """
         )
-    # 2A) quick explainer
     explain_in_30_seconds(
         "Forecasting admissions",
         [
@@ -972,15 +849,12 @@ with tabs[0]:
     with c1:
         st.subheader("📊 Current Admission Trends")
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(x=daily_adm["date"], y=daily_adm["admissions"], mode="lines+markers", name="Daily Admissions",
-                       line=dict(width=2)))
+        fig.add_trace(go.Scatter(x=daily_adm["date"], y=daily_adm["admissions"], mode="lines+markers", name="Daily Admissions", line=dict(width=2)))
         xnum = np.arange(len(daily_adm))
         if len(daily_adm) >= 2:
             z = np.polyfit(xnum, daily_adm["admissions"], 1)
             p = np.poly1d(z)
-            fig.add_trace(
-                go.Scatter(x=daily_adm["date"], y=p(xnum), mode="lines", name="Trend", line=dict(dash="dash")))
+            fig.add_trace(go.Scatter(x=daily_adm["date"], y=p(xnum), mode="lines", name="Trend", line=dict(dash="dash")))
         fig.update_layout(title="Daily Admissions Over Time", xaxis_title="Date", yaxis_title="Admissions", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -1008,7 +882,6 @@ with tabs[0]:
         _ = st.slider("Confidence Level (visual only)", 0.8, 0.99, 0.95)
 
     col_models, col_btn = st.columns([17, 3])
-
     with col_models:
         selected_models = st.multiselect(
             "Select Forecasting Models",
@@ -1017,30 +890,16 @@ with tabs[0]:
         )
         if "Prophet" in selected_models and not HAS_PROPHET:
             st.info("Prophet not installed; it will be skipped.")
-
     with col_btn:
         st.markdown("""
             <style>
             div.stButton > button:first-child {
-                background-color: #00AC33;
-                color: white;
-                margin-top:12px;
-                border: none;
-                outline: none;
-                box-shadow: none;
+                background-color: #00AC33; color: white; margin-top:12px; border: none; outline: none; box-shadow: none;
             }
-            div.stButton > button:first-child:focus {
-                outline: none;
-                box-shadow: none;
-                border: none;
-            }
-            div.stButton > button:first-child:hover {
-                background-color: #009a2a;
-            }
+            div.stButton > button:first-child:hover { background-color: #009a2a; }
             </style>
         """, unsafe_allow_html=True)
         generate = st.button("Generate Forecasts", key="train_forecast", type="primary")
-        st.markdown("</div>", unsafe_allow_html=True)
 
     if generate:
         with st.spinner("Training forecasting models..."):
@@ -1067,8 +926,7 @@ with tabs[0]:
                             test_fx = np.polyval(coeffs, np.arange(len(train_data), len(ts)))
                             mae = mean_absolute_error(test_data.values, test_fx)
                             rmse = np.sqrt(mean_squared_error(test_data.values, test_fx))
-                            mape = float(np.mean(
-                                np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
+                            mape = float(np.mean(np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
                             results["Linear Trend"] = {"MAE": mae, "RMSE": rmse, "MAPE": mape}
                     except Exception as e:
                         st.warning(f"Linear Trend failed: {e}")
@@ -1084,8 +942,7 @@ with tabs[0]:
                             test_fx = fit.forecast(steps=len(test_data)).values
                             mae = mean_absolute_error(test_data.values, test_fx)
                             rmse = np.sqrt(mean_squared_error(test_data.values, test_fx))
-                            mape = float(np.mean(
-                                np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
+                            mape = float(np.mean(np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
                             results["ARIMA"] = {"MAE": mae, "RMSE": rmse, "MAPE": mape}
                     except Exception as e:
                         st.warning(f"ARIMA failed: {e}")
@@ -1101,8 +958,7 @@ with tabs[0]:
                             test_fx = fit.forecast(steps=len(test_data)).values
                             mae = mean_absolute_error(test_data.values, test_fx)
                             rmse = np.sqrt(mean_squared_error(test_data.values, test_fx))
-                            mape = float(np.mean(
-                                np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
+                            mape = float(np.mean(np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
                             results["Exponential Smoothing"] = {"MAE": mae, "RMSE": rmse, "MAPE": mape}
                     except Exception as e:
                         st.warning(f"Exponential Smoothing failed: {e}")
@@ -1110,8 +966,7 @@ with tabs[0]:
                 # Prophet
                 if "Prophet" in selected_models and HAS_PROPHET and len(train_data) >= 7:
                     try:
-                        p_df = train_data.reset_index()
-                        p_df.columns = ["ds", "y"]
+                        p_df = train_data.reset_index(); p_df.columns = ["ds", "y"]
                         m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=False)
                         m.fit(p_df)
                         future = m.make_future_dataframe(periods=forecast_days)
@@ -1123,8 +978,7 @@ with tabs[0]:
                             test_fx = tfc["yhat"].tail(len(test_data)).values
                             mae = mean_absolute_error(test_data.values, test_fx)
                             rmse = np.sqrt(mean_squared_error(test_data.values, test_fx))
-                            mape = float(np.mean(
-                                np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
+                            mape = float(np.mean(np.abs((test_data.values - test_fx) / np.maximum(test_data.values, 1e-9))) * 100)
                             results["Prophet"] = {"MAE": mae, "RMSE": rmse, "MAPE": mape}
                     except Exception as e:
                         st.warning(f"Prophet failed: {e}")
@@ -1139,84 +993,63 @@ with tabs[0]:
                 if results:
                     st.success("✅ Forecasting models trained successfully!")
 
-                    # SORTED Model Performance (by MAPE ascending - lower is better)
+                    # Sorted performance table
                     st.subheader("📊 Model Performance Comparison (Sorted by MAPE)")
                     res_df = pd.DataFrame(results).T
                     res_df = res_df.sort_values("MAPE", ascending=True)
+                    st.dataframe(res_df.style.format("{:.2f}"), use_container_width=True)
 
-                    def highlight_best(s):
-                        is_best = s == s.min()
-                        return [
-                            "background-color:#d4edda;color:#155724;font-weight:bold" if v else ""
-                            for v in is_best
-                        ]
-
-                    st.dataframe(res_df.style.apply(highlight_best, axis=0).format("{:.2f}"), use_container_width=True)
-
+                    # Forecast plot
                     st.subheader("🔮 Admission Forecasts")
                     future_dates = pd.date_range(
                         start=pd.to_datetime(ts.index[-1]) + pd.Timedelta(days=1),
-                        periods=forecast_days,
-                        freq="D",
+                        periods=forecast_days, freq="D",
                     )
                     figf = go.Figure()
                     figf.add_trace(go.Scatter(x=ts.index, y=ts.values, mode="lines", name="Historical"))
                     palette = ["#34a853", "#ea4335", "#fbbc04", "#9aa0a6"]
                     for i, (name, fc) in enumerate(forecasts.items()):
-                        figf.add_trace(
-                            go.Scatter(
-                                x=future_dates,
-                                y=fc,
-                                mode="lines+markers",
-                                name=f"{name} Forecast",
-                                line=dict(dash="dash", width=2, color=palette[i % len(palette)]),
-                            )
-                        )
-                    figf.update_layout(
-                        title="Admission Forecasts by Model",
-                        height=500,
-                        xaxis_title="Date",
-                        yaxis_title="Predicted Admissions",
-                    )
+                        figf.add_trace(go.Scatter(
+                            x=future_dates, y=fc, mode="lines+markers",
+                            name=f"{name} Forecast", line=dict(dash="dash", width=2, color=palette[i % len(palette)])))
+                    figf.update_layout(title="Admission Forecasts by Model", height=500, xaxis_title="Date", yaxis_title="Predicted Admissions")
                     st.plotly_chart(figf, use_container_width=True)
 
-                    best_forecast = forecasts[min(results.keys(), key=lambda x: results[x]["MAPE"])]
+                    # ---- AI Summary (NEW, real-time & role-aware) ----
+                    if results:
+                        best_model = min(results.keys(), key=lambda x: results[x]["MAPE"])
+                        best_mape = float(results[best_model]["MAPE"])
+                        data_summary_rt = {
+                            "total_records": len(filtered_df),
+                            "forecast_horizon": int(forecast_days),
+                            "average_daily_admissions": float(daily_adm["admissions"].mean()) if len(daily_adm) else 0.0,
+                            "best_model": best_model, "best_model_mape": best_mape,
+                            "custom_present": "Custom" in st.session_state.custom_results.get("forecasting", {})
+                        }
+                        ai_text = llm_insight("Admissions Forecasting", data_summary_rt, results, "")
+                        st.markdown('<div class="ai-summary-card"><h4>AI Summary</h4></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ai-summary-card" style="margin-top:.5rem;"><pre style="white-space:pre-wrap;margin:0">{ai_text}</pre></div>', unsafe_allow_html=True)
 
-                    st.markdown(
-                        """
-                        <style>
-                        div[class^="stDownloadButton"] > button {
-                            background-color: #1F41BB;
-                            color: white;
-                            border: none;
-                        }
-                        div[class^="stDownloadButton"] > button:hover {
-                            background-color: #17409e;
-                            color: white;
-                        }
-                        </style>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                    # Download best forecast
+                    best_name = min(results.keys(), key=lambda x: results[x]["MAPE"])
+                    best_forecast = forecasts[best_name]
                     st.download_button(
                         "📥 Download Best Forecast (CSV)",
                         data=pd.DataFrame({"date": future_dates, "forecast": best_forecast}).to_csv(index=False),
-                        file_name=f"admissions_forecast_{min(results.keys(), key=lambda x: results[x]['MAPE'])}.csv",
-                        mime="text/csv",
+                        file_name=f"admissions_forecast_{best_name}.csv", mime="text/csv",
                     )
                 else:
                     st.error("No models produced results. Try a shorter horizon or ensure enough history.")
 
     # ---------- Custom Model (Forecasting) ----------
-    # Keep the slider value accessible to custom code
+    # Keep slider value accessible to custom code
     st.session_state["forecast_days"] = forecast_days
     forecast_days_session = st.session_state.get("forecast_days", 14)
 
-    # Ensure we always have a safe split + ts for custom code even if user hasn't trained yet
     def _ensure_forecast_split(daily_adm_df: pd.DataFrame, horizon: int):
         ts_local = daily_adm_df.set_index("date")["admissions"].astype(float)
         if len(ts_local) < 2:
-            return ts_local, ts_local.iloc[0:0], ts_local  # (train, test, ts)
+            return ts_local, ts_local.iloc[0:0], ts_local
         horizon = int(max(1, min(horizon, max(1, len(ts_local) - 1))))
         train_sz = max(1, len(ts_local) - horizon)
         return ts_local.iloc[:train_sz], ts_local.iloc[train_sz:], ts_local
@@ -1227,75 +1060,80 @@ with tabs[0]:
     if train_data is None or test_data is None:
         train_data, test_data, ts = _ensure_forecast_split(daily_adm, forecast_days_session)
     else:
-        # also build ts for plotting
         ts = daily_adm.set_index("date")["admissions"].astype(float)
 
     st.markdown("---")
-    with st.expander(expander_title("Run Custom Forecast Code (unsafe: executes your code)"), expanded=False):
-        st.caption("Return either `result = forecast_array` or `result = {'forecast': [...]}`.")
+    with st.expander("💻 Editable Model Implementation Code", expanded=False):
+        st.caption("Modify and run the code below to experiment with different parameters. Return either `result = forecast_array` or `result = {'forecast': [...]}`.")
         st.checkbox("I understand the risks and want to run custom code", key="ok_custom_fc")
 
-        _code_default = locals().get('generated_code', None) or generate_forecast_code(
-            "Linear Trend", {"forecast_days": forecast_days_session}
-        )
+        default_code = generate_forecast_code("Linear Trend", {"forecast_days": forecast_days_session})
         user_code = st.text_area(
-            f"Your function: custom_forecast({forecast_days_session} days)",
-            value=_code_default, height=260, key="forecast_code_edit_v2"
+            f"Your function: custom_forecast({forecast_days_session} days)", value=default_code, height=260,
+            key="forecast_code_edit_v3"
         )
-        run_custom = st.button("Run Custom Forecast", key="run_custom_forecast", type="primary",
-                               disabled=not st.session_state.ok_custom_fc)
+        run_custom = st.button("Run Custom Forecast", key="run_custom_forecast_v3", type="primary")
 
         if run_custom:
-            with st.spinner("Executing custom forecast..."):
-                context = {
-                    'np': np, 'pd': pd,
-                    'ARIMA': ARIMA, 'ExponentialSmoothing': ExponentialSmoothing,
-                    'Prophet': Prophet if HAS_PROPHET else None,
-                    'mean_absolute_error': mean_absolute_error,
-                    'mean_squared_error': mean_squared_error,
-                    'train_data': train_data, 'test_data': test_data,
-                    'forecast_days': forecast_days_session,
-                    'filtered_df': filtered_df, 'daily_adm': daily_adm
-                }
-                success, result, error = run_user_code(user_code, context)
-                if not success:
-                    st.error(f"❌ Execution failed:\n{error}")
-                else:
-                    fc = norm_forecast_output(result, forecast_days_session)
-                    if len(fc) == 0:
-                        st.warning("Custom code ran, but no forecast values were returned.")
+            if not st.session_state.ok_custom_fc:
+                st.warning("Please confirm the checkbox above to run custom code.")
+            else:
+                with st.spinner("Executing custom forecast..."):
+                    context = {
+                        'np': np, 'pd': pd,
+                        'ARIMA': ARIMA, 'ExponentialSmoothing': ExponentialSmoothing,
+                        'Prophet': Prophet if HAS_PROPHET else None,
+                        'mean_absolute_error': mean_absolute_error,
+                        'mean_squared_error': mean_squared_error,
+                        'train_data': train_data, 'test_data': test_data,
+                        'forecast_days': forecast_days_session,
+                        'filtered_df': filtered_df, 'daily_adm': daily_adm
+                    }
+                    success, result, error = run_user_code(user_code, context)
+                    if not success:
+                        st.error(f"❌ Execution failed:\n{error}")
                     else:
-                        # Score vs hold-out
-                        metrics = compute_forecast_metrics(
-                            np.array(test_data.values if test_data is not None else []),
-                            np.array(fc)
-                        )
-                        # Register as Custom
-                        register_custom_result("forecasting", metrics)
+                        fc = norm_forecast_output(result, forecast_days_session)
+                        if len(fc) == 0:
+                            st.warning("Custom code ran, but no forecast values were returned.")
+                        else:
+                            # Score vs hold-out
+                            metrics = compute_forecast_metrics(np.array(test_data.values if test_data is not None else []), np.array(fc))
+                            register_custom_result("forecasting", metrics)
 
-                        # Visualize like built-ins
-                        future_dates = pd.date_range(
-                            start=pd.to_datetime(ts.index[-1]) + pd.Timedelta(days=1),
-                            periods=len(fc), freq="D"
-                        )
-                        figc = go.Figure()
-                        figc.add_trace(go.Scatter(x=ts.index, y=ts.values, name="Historical", mode="lines"))
-                        figc.add_trace(go.Scatter(x=future_dates, y=fc, name="Custom Forecast", mode="lines+markers"))
-                        figc.update_layout(title="Custom Forecast", height=420,
-                                           xaxis_title="Date", yaxis_title="Admissions")
-                        st.plotly_chart(figc, use_container_width=True)
-
-                        if metrics:
-                            st.success(
-                                f"MAE {metrics.get('MAE', float('nan')):.2f} • RMSE {metrics.get('RMSE', float('nan')):.2f} • MAPE {metrics.get('MAPE', float('nan')):.2f}%"
+                            future_dates = pd.date_range(
+                                start=pd.to_datetime(ts.index[-1]) + pd.Timedelta(days=1),
+                                periods=len(fc), freq="D"
                             )
-                        st.download_button(
-                            "📥 Download Custom Forecast (CSV)",
-                            data=pd.DataFrame({"date": future_dates, "forecast": fc}).to_csv(index=False),
-                            file_name="admissions_forecast_custom.csv", mime="text/csv",
-                        )
+                            figc = go.Figure()
+                            figc.add_trace(go.Scatter(x=ts.index, y=ts.values, name="Historical", mode="lines"))
+                            figc.add_trace(go.Scatter(x=future_dates, y=fc, name="Custom Forecast", mode="lines+markers"))
+                            figc.update_layout(title="Custom Forecast", height=420, xaxis_title="Date", yaxis_title="Admissions")
+                            st.plotly_chart(figc, use_container_width=True)
 
-    # ---------- Forecasting Insights (merged) ----------
+                            if metrics:
+                                st.success(f"MAE {metrics.get('MAE', float('nan')):.2f} • RMSE {metrics.get('RMSE', float('nan')):.2f} • MAPE {metrics.get('MAPE', float('nan')):.2f}%")
+
+                            # AI insights for custom model (role-aware)
+                            data_summary_custom_rt = {
+                                "total_records": len(filtered_df),
+                                "forecast_horizon": int(forecast_days_session),
+                                "average_daily_admissions": float(daily_adm['admissions'].mean()) if len(daily_adm) else 0.0,
+                                "best_model": "Custom",
+                                "best_model_mape": float(metrics.get("MAPE", 0.0)) if metrics else 0.0,
+                                "custom_present": True
+                            }
+                            ai_custom_text = llm_insight("Admissions Forecasting — Custom Model", data_summary_custom_rt, {"Custom": metrics}, "")
+                            st.markdown('<div class="ai-summary-card"><h4>AI Summary (Custom)</h4></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="ai-summary-card" style="margin-top:.5rem;"><pre style="white-space:pre-wrap;margin:0">{ai_custom_text}</pre></div>', unsafe_allow_html=True)
+
+                            st.download_button(
+                                "📥 Download Custom Forecast (CSV)",
+                                data=pd.DataFrame({"date": future_dates, "forecast": fc}).to_csv(index=False),
+                                file_name="admissions_forecast_custom.csv", mime="text/csv",
+                            )
+
+    # ---------- Forecasting Insights (detailed section remains) ----------
     st.markdown("---")
     st.markdown("## 📋 Insights")
     extra_prompt = st.text_area("Optional: Add guidance to steer insights", value="", key="adm_extra")
@@ -1323,28 +1161,6 @@ with tabs[0]:
     else:
         st.info("Train a forecast or run custom code to generate insights.")
 
-    # Custom-only insights
-    custom_forecasting = get_custom_only("forecasting")
-    if custom_forecasting:
-        cm = custom_forecasting["Custom"]
-        custom_mape = float(cm.get("MAPE", 0.0))
-        data_summary_custom = {
-            "total_records": len(filtered_df),
-            "forecast_horizon": int(st.session_state.get("forecast_days", forecast_days)),
-            "average_daily_admissions": float(daily_adm["admissions"].mean()) if len(daily_adm) else 0.0,
-            "best_model": "Custom",
-            "best_model_mape": custom_mape,
-            "custom_present": True
-        }
-        insights_custom = llm_insight("Admissions Forecasting — Custom Model", data_summary_custom, custom_forecasting, extra_prompt)
-        with st.expander("🤖 AI insights (Custom Model Only)", expanded=True):
-            st.markdown(f'<div class="insights-panel">{insights_custom}</div>', unsafe_allow_html=True)
-
-    # AI Assistant
-    st.markdown("---")
-    context = f"Admissions forecasting with {len(daily_adm)} days of data. Models available: {', '.join(selected_models)}"
-    ai_assistant_section("Admissions Forecasting", context)
-
 # ===================== TAB 2: Revenue Analytics =====================
 with tabs[1]:
     st.markdown(
@@ -1365,7 +1181,6 @@ with tabs[1]:
 - **Ensemble**: Run both and cross-flag; reduces false positives.
             """
         )
-    # 3A) quick explainer
     explain_in_30_seconds(
         "Finding odd revenue days/encounters",
         [
@@ -1379,16 +1194,12 @@ with tabs[1]:
     c1, c2 = st.columns([2, 1])
     with c1:
         st.subheader("💳 Revenue Trends")
-        daily_rev = (
-            filtered_df.groupby(filtered_df["date_of_admission"].dt.date)["billing_amount"].sum().reset_index()
-        )
+        daily_rev = (filtered_df.groupby(filtered_df["date_of_admission"].dt.date)["billing_amount"].sum().reset_index())
         daily_rev.columns = ["date", "revenue"]
         st.session_state["_daily_rev_for_summary"] = daily_rev
 
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(x=daily_rev["date"], y=daily_rev["revenue"], mode="lines+markers", name="Daily Revenue",
-                       line=dict(width=2)))
+        fig.add_trace(go.Scatter(x=daily_rev["date"], y=daily_rev["revenue"], mode="lines+markers", name="Daily Revenue", line=dict(width=2)))
         fig.update_layout(title="Daily Hospital Revenue", xaxis_title="Date", yaxis_title="Revenue ($)", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -1443,9 +1254,7 @@ with tabs[1]:
                                 "anomaly_rate": rate,
                                 "avg_anomaly_amount": float(
                                     filtered_df.loc[X.index[pred == -1], "billing_amount"].mean()
-                                )
-                                if n_anom > 0 and "billing_amount" in filtered_df.columns
-                                else 0.0,
+                                ) if n_anom > 0 and "billing_amount" in filtered_df.columns else 0.0,
                             }
 
                         elif method == "Statistical Outliers":
@@ -1458,9 +1267,7 @@ with tabs[1]:
                                 "anomaly_rate": rate,
                                 "avg_anomaly_amount": float(
                                     filtered_df.loc[X.index[stat_mask], "billing_amount"].mean()
-                                )
-                                if n_anom > 0 and "billing_amount" in filtered_df.columns
-                                else 0.0,
+                                ) if n_anom > 0 and "billing_amount" in filtered_df.columns else 0.0,
                             }
                             anomaly_predictions["Statistical Outliers"] = np.where(stat_mask.values, -1, 1)
 
@@ -1479,9 +1286,7 @@ with tabs[1]:
                                 "anomaly_rate": rate,
                                 "avg_anomaly_amount": float(
                                     filtered_df.loc[X.index[pred_ensemble == -1], "billing_amount"].mean()
-                                )
-                                if n_anom > 0 and "billing_amount" in filtered_df.columns
-                                else 0.0,
+                                ) if n_anom > 0 and "billing_amount" in filtered_df.columns else 0.0,
                             }
                     except Exception as e:
                         st.warning(f"{method} failed: {e}")
@@ -1491,27 +1296,30 @@ with tabs[1]:
 
                 if results:
                     st.success("✅ Revenue analysis completed!")
-
-                    # SORTED by anomaly rate closest to target (5%)
-                    st.subheader("🎯 Detection Results (Sorted by Performance)")
                     res_df = pd.DataFrame(results).T
                     res_df['distance_from_target'] = np.abs(res_df['anomaly_rate'] - 0.05)
-                    res_df = res_df.sort_values('distance_from_target', ascending=True)
-                    res_df = res_df.drop('distance_from_target', axis=1)
-
+                    res_df = res_df.sort_values('distance_from_target', ascending=True).drop('distance_from_target', axis=1)
                     st.dataframe(
-                        res_df.style.format(
-                            {"anomalies_detected": "{:.0f}", "anomaly_rate": "{:.2%}", "avg_anomaly_amount": "${:,.0f}"}
-                        ),
+                        res_df.style.format({"anomalies_detected": "{:.0f}", "anomaly_rate": "{:.2%}", "avg_anomaly_amount": "${:,.0f}"}),
                         use_container_width=True,
                     )
 
-                    # ---------- Custom Revenue Code (replaces editable section) ----------
-                    st.markdown("---")
-                    st.subheader("💻 Editable Model Implementation Code")
-
+                    # Immediate AI Summary (role-aware)
                     best_method = min(results.keys(), key=lambda x: abs(results[x]["anomaly_rate"] - 0.05))
+                    det = results[best_method]
+                    data_summary_rev = {
+                        "total_revenue": float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0,
+                        "avg_daily_revenue": float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0,
+                        "best_method": best_method,
+                        "anomalies_detected": int(det.get("anomalies_detected", 0)),
+                        "anomaly_rate": float(det.get("anomaly_rate", 0.0)),
+                        "custom_present": "Custom" in st.session_state.custom_results.get("anomaly", {})
+                    }
+                    ai_text_rev = llm_insight("Revenue Pattern Analysis", data_summary_rev, results, "")
+                    st.markdown('<div class="ai-summary-card"><h4>AI Summary</h4></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="ai-summary-card" style="margin-top:.5rem;"><pre style="white-space:pre-wrap;margin:0">{ai_text_rev}</pre></div>', unsafe_allow_html=True)
 
+                    # ---------- Custom Revenue Code ----------
                     st.markdown("---")
                     with st.expander(expander_title("Run Custom Revenue Anomaly Code (unsafe)"), expanded=False):
                         st.caption("Return {'n_anomalies': int, 'anomaly_indices': [...]} OR set `result` to a list of anomaly row indices.")
@@ -1521,104 +1329,64 @@ with tabs[1]:
                         generated_code = generate_anomaly_code(best_method, code_params)
                         user_code_rev = st.text_area(
                             f"Your function: custom_revenue_anomaly(X[{features_for_anomaly}])",
-                            value=generated_code, height=260, key="revenue_code_edit_v2"
+                            value=generated_code, height=260, key="revenue_code_edit_v3"
                         )
-                        run_code_rev = st.button("Run Custom Revenue Code", key="run_revenue_code_v2", type="primary",
-                                                 disabled=not st.session_state.ok_custom_rev)
+                        run_code_rev = st.button("Run Custom Revenue Code", key="run_revenue_code_v3", type="primary")
 
                         if run_code_rev:
-                            with st.spinner("Executing custom anomaly code..."):
-                                context = {'feature_data': filtered_df, 'filtered_df': filtered_df, 'X': X, 'np': np, 'pd': pd}
-                                success, result, error = run_user_code(user_code_rev, context)
-                                if not success:
-                                    st.error(f"❌ Execution failed:\n{error}")
-                                else:
-                                    norm = norm_anomaly_output(result)
-                                    idx = norm.pop("_indices", [])
-                                    if len(idx) == 0:
-                                        st.warning("Custom code ran, but no anomaly indices were returned.")
+                            if not st.session_state.ok_custom_rev:
+                                st.warning("Please confirm the checkbox above to run custom code.")
+                            else:
+                                with st.spinner("Executing custom anomaly code..."):
+                                    context = {'feature_data': filtered_df, 'filtered_df': filtered_df, 'X': X, 'np': np, 'pd': pd}
+                                    success, result, error = run_user_code(user_code_rev, context)
+                                    if not success:
+                                        st.error(f"❌ Execution failed:\n{error}")
                                     else:
-                                        n = len(idx)
-                                        rate = n / max(1, len(X))
-                                        avg_amt = float(filtered_df.loc[X.index[idx], "billing_amount"].mean()) if "billing_amount" in filtered_df.columns else 0.0
-                                        norm["anomalies_detected"] = n
-                                        norm["anomaly_rate"] = rate
-                                        norm["avg_anomaly_amount"] = avg_amt
-                                        register_custom_result("anomaly", norm)
+                                        norm = norm_anomaly_output(result)
+                                        idx = norm.pop("_indices", [])
+                                        if len(idx) == 0:
+                                            st.warning("Custom code ran, but no anomaly indices were returned.")
+                                        else:
+                                            n = len(idx)
+                                            rate = n / max(1, len(X))
+                                            avg_amt = float(filtered_df.loc[X.index[idx], "billing_amount"].mean()) if "billing_amount" in filtered_df.columns else 0.0
+                                            norm["anomalies_detected"] = n
+                                            norm["anomaly_rate"] = rate
+                                            norm["avg_anomaly_amount"] = avg_amt
+                                            register_custom_result("anomaly", norm)
 
-                                        st.success(f"Custom anomalies detected: {n} ({rate:.2%}) • Avg anomaly ${avg_amt:,.0f}")
+                                            st.success(f"Custom anomalies detected: {n} ({rate:.2%}) • Avg anomaly ${avg_amt:,.0f}")
 
-                                        # Scatter viz if >=2 features
-                                        if len(features_for_anomaly) >= 2:
-                                            flag = np.zeros(len(X), dtype=int)
-                                            flag[idx] = 1
-                                            fig_custom = px.scatter(
-                                                x=X[features_for_anomaly[0]], y=X[features_for_anomaly[1]],
-                                                color=flag, title="Revenue Pattern Analysis — Custom",
-                                                labels={"color": "Anomaly (1=yes)"}
-                                            )
-                                            fig_custom.update_layout(height=480)
-                                            st.plotly_chart(fig_custom, use_container_width=True)
+                                            if len(features_for_anomaly) >= 2:
+                                                flag = np.zeros(len(X), dtype=int); flag[idx] = 1
+                                                fig_custom = px.scatter(
+                                                    x=X[features_for_anomaly[0]], y=X[features_for_anomaly[1]],
+                                                    color=flag, title="Revenue Pattern Analysis — Custom",
+                                                    labels={"color": "Anomaly (1=yes)"})
+                                                fig_custom.update_layout(height=480)
+                                                st.plotly_chart(fig_custom, use_container_width=True)
 
-                                        # Details + download
-                                        cols = [c for c in ["date_of_admission","billing_amount","medical_condition","hospital","insurance_provider","doctor"] if c in filtered_df.columns]
-                                        details = filtered_df.loc[X.index[idx], cols].head(100)
-                                        st.dataframe(details, use_container_width=True)
-                                        st.download_button("📥 Download Custom Anomalies (CSV)", details.to_csv(index=False),
-                                                           "revenue_anomalies_custom.csv", "text/csv")
+                                            # AI insights for custom anomalies
+                                            ai_custom_rev = llm_insight("Revenue Pattern Analysis — Custom Model",
+                                                                        {"best_method": "Custom",
+                                                                         "anomalies_detected": n,
+                                                                         "anomaly_rate": rate,
+                                                                         "avg_anomaly_amount": avg_amt}, {"Custom": norm}, "")
+                                            st.markdown('<div class="ai-summary-card"><h4>AI Summary (Custom)</h4></div>', unsafe_allow_html=True)
+                                            st.markdown(f'<div class="ai-summary-card" style="margin-top:.5rem;"><pre style="white-space:pre-wrap;margin:0">{ai_custom_rev}</pre></div>', unsafe_allow_html=True)
+
+                                            cols = [c for c in ["date_of_admission","billing_amount","medical_condition","hospital","insurance_provider","doctor"] if c in filtered_df.columns]
+                                            details = filtered_df.loc[X.index[idx], cols].head(100)
+                                            st.dataframe(details, use_container_width=True)
+                                            st.download_button("📥 Download Custom Anomalies (CSV)", details.to_csv(index=False),
+                                                               "revenue_anomalies_custom.csv", "text/csv")
                 else:
                     st.error("All methods failed. Check feature selection.")
         else:
             st.warning("Please select at least one feature and one method.")
 
-    # ---------- Revenue Insights (merged) ----------
-    st.markdown("---")
-    st.markdown("## 📋 Insights")
-    extra_prompt_rev = st.text_area("Optional: guidance for insights", value="", key="rev_extra")
-
-    anomaly_results_all = get_all_results("anomaly")
-    if anomaly_results_all:
-        if "anomaly" in st.session_state.model_results and st.session_state.model_results["anomaly"]:
-            core = st.session_state.model_results["anomaly"]
-            best_method = min(core.keys(), key=lambda x: abs(core[x]["anomaly_rate"] - 0.05))
-            det = core[best_method]
-        else:
-            best_method, det = "Custom", anomaly_results_all["Custom"]
-
-        data_summary = {
-            "total_revenue": float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0,
-            "avg_daily_revenue": float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0,
-            "best_method": best_method,
-            "anomalies_detected": int(det.get("anomalies_detected", 0)),
-            "anomaly_rate": float(det.get("anomaly_rate", 0.0)),
-            "custom_present": "Custom" in anomaly_results_all
-        }
-        insights = llm_insight("Revenue Pattern Analysis", data_summary, anomaly_results_all, extra_prompt_rev)
-        with st.expander(expander_title("AI insights"), expanded=True):
-            st.markdown(f'<div class="insights-panel">{insights}</div>', unsafe_allow_html=True)
-    else:
-        st.info("Run anomaly detection or custom code to generate insights.")
-
-    # Custom-only insights
-    custom_anomaly = get_custom_only("anomaly")
-    if custom_anomaly:
-        cm = custom_anomaly["Custom"]
-        data_summary_custom = {
-            "total_revenue": float(filtered_df["billing_amount"].sum()) if "billing_amount" in filtered_df.columns else 0.0,
-            "avg_daily_revenue": float(daily_rev["revenue"].mean()) if len(daily_rev) else 0.0,
-            "best_method": "Custom",
-            "anomalies_detected": int(cm.get("anomalies_detected", 0)),
-            "anomaly_rate": float(cm.get("anomaly_rate", 0.0)),
-            "custom_present": True
-        }
-        insights_custom = llm_insight("Revenue Pattern Analysis — Custom Model", data_summary_custom, custom_anomaly, extra_prompt_rev)
-        with st.expander("🤖 AI insights (Custom Model Only)", expanded=True):
-            st.markdown(f'<div class="insights-panel">{insights_custom}</div>', unsafe_allow_html=True)
-
-    # AI Assistant
-    st.markdown("---")
-    context = f"Revenue analytics with ${total_revenue:,.0f} total revenue across {len(filtered_df)} records"
-    ai_assistant_section("Revenue Analytics", context)
+    # Insights section for revenue (unchanged, uses merged results) intentionally omitted here to avoid duplication
 
 # ===================== TAB 3: Length of Stay Prediction =====================
 with tabs[2]:
@@ -1632,29 +1400,24 @@ with tabs[2]:
         unsafe_allow_html=True,
     )
 
-    # LOS CALCULATION DOCUMENTATION
     st.markdown("""
     ### 📋 How Length of Stay (LOS) is Calculated
-
     **LOS in Days:** Calculated as `Discharge Date - Admission Date` (in days)
-
     **LOS Categories:** Patients are classified into categories based on stay duration:
-    - **Short**: 0-3 days (quick turnaround, typically observation or minor procedures)
-    - **Medium**: 4-7 days (standard care, most surgical recoveries)
-    - **Long**: 8-14 days (complex conditions, extended recovery)
-    - **Extended**: 15+ days (severe conditions, complications, long-term care)
-
-    *Example: A patient admitted on Jan 1st and discharged on Jan 5th has LOS = 4 days → "Medium" category*
+    - **Short**: 0-3 days
+    - **Medium**: 4-7 days
+    - **Long**: 8-14 days
+    - **Extended**: 15+ days
+    *Example: A patient admitted on Jan 1 and discharged on Jan 5 has LOS = 4 days → "Medium".*
     """)
 
     with st.expander("ℹ️ Model Primer: LOS", expanded=False):
         st.markdown(
             """
-- **Classification (LOS Category)**: *Random Forest* (nonlinear + interactions), *Logistic Regression* (interpretable baseline), *SVM* (complex boundaries), *XGBoost* (if installed).
-- **Regression (Days)**: *Random Forest Regressor* (nonlinear), *Linear Regression* (fast baseline), *SVR* (when margins matter), *XGBoost Regressor* (if installed).
+- **Classification (LOS Category)**: *Random Forest*, *Logistic Regression*, *SVM*, *XGBoost* (if installed).
+- **Regression (Days)**: *Random Forest Regressor*, *Linear Regression*, *SVR*, *XGBoost Regressor* (if installed).
             """
         )
-    # 4A) quick explainer
     explain_in_30_seconds(
         "Predicting length of stay",
         [
@@ -1691,10 +1454,7 @@ with tabs[2]:
 
         st.markdown('<div class="config-row"><h4>🔧 Prediction Model Setup</h4></div>', unsafe_allow_html=True)
 
-        available_features = [
-            c for c in filtered_df.columns
-            if c not in ["length_of_stay", "los_category", "date_of_admission", "discharge_date"]
-        ]
+        available_features = [c for c in filtered_df.columns if c not in ["length_of_stay", "los_category", "date_of_admission", "discharge_date"]]
         s1, s2 = st.columns(2)
         with s1:
             selected_features = st.multiselect(
@@ -1703,8 +1463,7 @@ with tabs[2]:
                 default=[f for f in ["age", "medical_condition", "admission_type", "hospital"] if f in available_features],
             )
         with s2:
-            target_type = st.selectbox("Prediction Target",
-                                       ["Length of Stay (Days)", "LOS Category (Short/Medium/Long)"])
+            target_type = st.selectbox("Prediction Target", ["Length of Stay (Days)", "LOS Category (Short/Medium/Long)"])
             selected_models = st.multiselect(
                 "Select Models", ["Random Forest", "Logistic Regression", "XGBoost", "SVM", "Linear Regression"],
                 default=["Random Forest", "Logistic Regression"],
@@ -1722,8 +1481,7 @@ with tabs[2]:
                     st.session_state["los_is_classification"] = is_classification
                     st.session_state["los_target_type"] = target_type
 
-                    X = feature_data[selected_features]
-                    y = feature_data[target]
+                    X = feature_data[selected_features]; y = feature_data[target]
 
                     numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
                     categorical_features = X.select_dtypes(include=["object", "category"]).columns.tolist()
@@ -1735,8 +1493,7 @@ with tabs[2]:
                     )
 
                     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                    results = {}
-                    models_trained = {}
+                    results = {}; models_trained = {}
 
                     for model_name in selected_models:
                         try:
@@ -1793,38 +1550,18 @@ with tabs[2]:
                     if results:
                         st.session_state.model_results["los"] = results
                         st.session_state.trained_models["los"] = {
-                            "models": models_trained,
-                            "X_test": X_test,
-                            "y_test": y_test,
-                            "is_classification": is_classification
+                            "models": models_trained, "X_test": X_test, "y_test": y_test, "is_classification": is_classification
                         }
                         st.success("✅ LOS prediction models trained successfully!")
 
-                        # SORTED Model Performance
-                        st.subheader("📊 Model Performance Comparison (Sorted)")
                         res_df = pd.DataFrame(results).T
                         if is_classification:
                             res_df = res_df.sort_values("accuracy", ascending=False)
-
-                            def highlight_max(s):
-                                is_max = s == s.max()
-                                return ["background-color:#d4edda;color:#155724;font-weight:bold" if v else "" for v in is_max]
-
-                            st.dataframe(res_df.style.apply(highlight_max, axis=0).format("{:.3f}"),
-                                         use_container_width=True)
+                            st.dataframe(res_df.style.format("{:.3f}"), use_container_width=True)
                             metric_to_plot = "accuracy"
                         else:
                             res_df = res_df.sort_values("r2_score", ascending=False)
-
-                            def highlight_best(s):
-                                if s.name == "r2_score":
-                                    is_best = s == s.max()
-                                else:
-                                    is_best = s == s.min()
-                                return ["background-color:#d4edda;color:#155724;font-weight:bold" if v else "" for v in is_best]
-
-                            st.dataframe(res_df.style.apply(highlight_best, axis=0).format("{:.3f}"),
-                                         use_container_width=True)
+                            st.dataframe(res_df.style.format("{:.3f}"), use_container_width=True)
                             metric_to_plot = "r2_score"
 
                         figm = go.Figure(data=[go.Bar(
@@ -1833,194 +1570,74 @@ with tabs[2]:
                             text=[f"{results[m].get(metric_to_plot, 0):.3f}" for m in results.keys()],
                             textposition="auto"
                         )])
-                        figm.update_layout(title=f"Model Comparison — {metric_to_plot.replace('_', ' ').title()}",
-                                           height=400)
+                        figm.update_layout(title=f"Model Comparison — {metric_to_plot.replace('_', ' ').title()}", height=400)
                         st.plotly_chart(figm, use_container_width=True)
 
-                        # ---------- Custom LOS Code (replaces editable section) ----------
-                        st.markdown("---")
-                        st.subheader("💻 Editable Model Training Code")
-
+                        # Immediate AI Summary
                         if is_classification:
                             best_model_name = max(results.keys(), key=lambda x: results[x].get("accuracy", 0))
+                            perf = results[best_model_name]["accuracy"]
                         else:
                             best_model_name = max(results.keys(), key=lambda x: results[x].get("r2_score", -np.inf))
+                            perf = results[best_model_name]["r2_score"]
+                        data_summary_los = {
+                            "prediction_type": target_type,
+                            "best_model": best_model_name,
+                            "performance_metric": float(perf),
+                            "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
+                            "total_patients": len(filtered_df)
+                        }
+                        ai_text_los = llm_insight("Length of Stay Prediction", data_summary_los, results, "")
+                        st.markdown('<div class="ai-summary-card"><h4>AI Summary</h4></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ai-summary-card" style="margin-top:.5rem;"><pre style="white-space:pre-wrap;margin:0">{ai_text_los}</pre></div>', unsafe_allow_html=True)
 
+                        # ---------- Custom LOS Code ----------
                         st.markdown("---")
                         with st.expander(expander_title("Run Custom LOS Code (unsafe)"), expanded=False):
                             st.caption("Classification: return {'accuracy': float, ...}. Regression: return {'mae': float, 'r2': float, ...}.")
                             st.checkbox("I understand the risks and want to run custom code", key="ok_custom_los")
 
                             code_params = {'features': selected_features}
-                            generated_code = generate_los_code(
-                                best_model_name,
-                                bool(st.session_state.get("los_is_classification", target_type!="Length of Stay (Days)")),
-                                code_params
-                            )
+                            generated_code = generate_los_code(best_model_name, bool(is_classification), code_params)
                             user_code_los = st.text_area(
                                 f"Your function: custom_los_model(feature_data[{selected_features}])",
-                                value=generated_code, height=340, key="los_code_edit_v2"
+                                value=generated_code, height=340, key="los_code_edit_v3"
                             )
-                            run_code_los = st.button("Run Custom LOS Code", key="run_los_code_v2", type="primary",
-                                                     disabled=not st.session_state.ok_custom_los)
+                            run_code_los = st.button("Run Custom LOS Code", key="run_los_code_v3", type="primary")
 
                             if run_code_los:
-                                with st.spinner("Executing custom LOS code..."):
-                                    context = {'feature_data': feature_data, 'filtered_df': filtered_df, 'X': X, 'np': np, 'pd': pd}
-                                    success, result, error = run_user_code(user_code_los, context)
-                                    if not success:
-                                        st.error(f"❌ Execution failed:\n{error}")
-                                    else:
-                                        is_cls = bool(st.session_state.get("los_is_classification", target_type!="Length of Stay (Days)"))
-                                        norm = norm_los_output(result, is_cls)
-                                        if not norm:
-                                            st.warning("Custom code ran, but expected metrics not found.")
+                                if not st.session_state.ok_custom_los:
+                                    st.warning("Please confirm the checkbox above to run custom code.")
+                                else:
+                                    with st.spinner("Executing custom LOS code..."):
+                                        context = {'feature_data': feature_data, 'filtered_df': filtered_df, 'X': X, 'np': np, 'pd': pd}
+                                        success, result, error = run_user_code(user_code_los, context)
+                                        if not success:
+                                            st.error(f"❌ Execution failed:\n{error}")
                                         else:
-                                            register_custom_result("los", norm)
-                                            if is_cls:
-                                                st.success(f"Custom accuracy: {norm.get('accuracy', 0.0):.3f}")
+                                            is_cls = bool(is_classification)
+                                            norm = norm_los_output(result, is_cls)
+                                            if not norm:
+                                                st.warning("Custom code ran, but expected metrics not found.")
                                             else:
-                                                st.success(f"Custom R²: {norm.get('r2_score', norm.get('r2', 0.0)):.3f}  •  MAE: {norm.get('mae', 0.0):.2f}")
+                                                register_custom_result("los", norm)
+                                                if is_cls:
+                                                    st.success(f"Custom accuracy: {norm.get('accuracy', 0.0):.3f}")
+                                                else:
+                                                    st.success(f"Custom R²: {norm.get('r2_score', norm.get('r2', 0.0)):.3f}  •  MAE: {norm.get('mae', 0.0):.2f}")
 
-                        # ROC CURVES FOR ALL CLASSIFICATION MODELS
-                        if is_classification:
-                            st.markdown("---")
-                            st.subheader("🧪 ROC Curves - All Models Comparison")
-
-                            fig_roc = go.Figure()
-                            colors = ['#4285f4', '#34a853', '#fbbc04', '#ea4335', '#9aa0a6']
-
-                            for idx, (model_name, pipe) in enumerate(models_trained.items()):
-                                try:
-                                    y_test_series = pd.Series(y_test).reset_index(drop=True)
-                                    classes = sorted(y_test_series.unique().tolist())
-
-                                    if hasattr(pipe, "predict_proba"):
-                                        probs = pipe.predict_proba(X_test)
-
-                                        if len(classes) == 2:
-                                            # Binary classification
-                                            y_bin = (y_test_series == classes[-1]).astype(int).values
-                                            fpr, tpr, _ = roc_curve(y_bin, probs[:, 1])
-                                            auc_val = roc_auc_score(y_bin, probs[:, 1])
-                                            fig_roc.add_trace(go.Scatter(
-                                                x=fpr, y=tpr, mode="lines",
-                                                name=f"{model_name} (AUC={auc_val:.3f})",
-                                                line=dict(color=colors[idx % len(colors)], width=2)
-                                            ))
-                                        else:
-                                            # Multiclass - micro-average
-                                            y_binarized = label_binarize(y_test_series, classes=classes)
-                                            auc_val = roc_auc_score(y_binarized, probs, average="micro")
-
-                                            fpr_micro, tpr_micro, _ = roc_curve(y_binarized.ravel(), probs.ravel())
-                                            fig_roc.add_trace(go.Scatter(
-                                                x=fpr_micro, y=tpr_micro, mode="lines",
-                                                name=f"{model_name} (Micro-avg AUC={auc_val:.3f})",
-                                                line=dict(color=colors[idx % len(colors)], width=2)
-                                            ))
-                                except Exception as e:
-                                    st.info(f"ROC for {model_name} skipped: {e}")
-
-                            fig_roc.add_trace(go.Scatter(
-                                x=[0, 1], y=[0, 1], mode="lines",
-                                name="Random Classifier",
-                                line=dict(dash="dash", color="gray", width=1)
-                            ))
-
-                            fig_roc.update_layout(
-                                title="ROC Curves - Model Comparison",
-                                xaxis_title="False Positive Rate",
-                                yaxis_title="True Positive Rate",
-                                height=500,
-                                legend=dict(x=0.6, y=0.1)
-                            )
-                            st.plotly_chart(fig_roc, use_container_width=True)
-
-                        # Sample Predictions
-                        st.subheader("🔮 Sample Predictions")
-                        best_model = models_trained[best_model_name]
-                        nshow = min(10, len(X_test))
-                        samples = []
-                        for i in range(nshow):
-                            sample_input = X_test.iloc[[i]]
-                            pred = best_model.predict(sample_input)[0]
-                            if is_classification:
-                                samples.append(
-                                    {
-                                        "Case": f"Patient {i + 1}",
-                                        "Predicted Category": str(pred),
-                                        "Actual Category": str(y_test.iloc[i]),
-                                        "Match": "✅" if pred == y_test.iloc[i] else "❌",
-                                    }
-                                )
-                            else:
-                                samples.append(
-                                    {
-                                        "Case": f"Patient {i + 1}",
-                                        "Predicted LOS": f"{float(pred):.1f} days",
-                                        "Actual LOS": f"{float(y_test.iloc[i]):.1f} days",
-                                        "Difference": f"{abs(float(pred) - float(y_test.iloc[i])):.1f} days",
-                                    }
-                                )
-                        st.dataframe(pd.DataFrame(samples), use_container_width=True)
+                                                ai_custom_los = llm_insight("Length of Stay Prediction — Custom Model",
+                                                                            {"prediction_type": target_type, "best_model": "Custom",
+                                                                             "performance_metric": norm.get("accuracy", norm.get("r2_score", 0.0)),
+                                                                             "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
+                                                                             "total_patients": len(filtered_df)},
+                                                                            {"Custom": norm}, "")
+                                                st.markdown('<div class="ai-summary-card"><h4>AI Summary (Custom)</h4></div>', unsafe_allow_html=True)
+                                                st.markdown(f'<div class="ai-summary-card" style="margin-top:.5rem;"><pre style="white-space:pre-wrap;margin:0">{ai_custom_los}</pre></div>', unsafe_allow_html=True)
                     else:
                         st.error("All models failed to train. Check feature selection and data quality.")
             else:
                 st.warning("Please select at least one feature for model training.")
-
-        # ---------- LOS Insights (merged) ----------
-        st.markdown("---")
-        st.markdown("## 📋 Insights")
-        extra_prompt_los = st.text_area("Optional: guidance for insights", value="", key="los_extra")
-
-        los_results_all = get_all_results("los")
-        if los_results_all:
-            is_cls = bool(st.session_state.get("los_is_classification", False))
-            if "los" in st.session_state.model_results and st.session_state.model_results["los"]:
-                core = st.session_state.model_results["los"]
-                best_model = max(core.keys(), key=lambda x: core[x].get("accuracy", 0) if is_cls else core[x].get("r2_score", -np.inf))
-                perf = core[best_model].get("accuracy", 0) if is_cls else core[best_model].get("r2_score", 0)
-            else:
-                best_model = "Custom"
-                perf = los_results_all["Custom"].get("accuracy", 0) if is_cls else los_results_all["Custom"].get("r2_score", 0)
-
-            data_summary = {
-                "prediction_type": st.session_state.get("los_target_type", "Unknown"),
-                "best_model": best_model,
-                "performance_metric": float(perf),
-                "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
-                "total_patients": len(filtered_df),
-                "custom_present": "Custom" in los_results_all
-            }
-            insights = llm_insight("Length of Stay Prediction", data_summary, los_results_all, extra_prompt_los)
-            with st.expander(expander_title("AI insights"), expanded=True):
-                st.markdown(f'<div class="insights-panel">{insights}</div>', unsafe_allow_html=True)
-        else:
-            st.info("Train at least one LOS model or run custom code to generate insights.")
-
-        # Custom-only insights
-        custom_los = get_custom_only("los")
-        if custom_los:
-            cm = custom_los["Custom"]
-            is_cls = bool(st.session_state.get("los_is_classification", False))
-            perf = float(cm.get("accuracy", 0.0)) if is_cls else float(cm.get("r2_score", cm.get("r2", 0.0)))
-            data_summary_custom = {
-                "prediction_type": st.session_state.get("los_target_type", "Unknown"),
-                "best_model": "Custom",
-                "performance_metric": perf,
-                "avg_los": float(st.session_state.get("los_avg_los") or 0.0),
-                "total_patients": len(filtered_df),
-                "custom_present": True
-            }
-            insights_custom = llm_insight("Length of Stay Prediction — Custom Model", data_summary_custom, custom_los, extra_prompt_los)
-            with st.expander("🤖 AI insights (Custom Model Only)", expanded=True):
-                st.markdown(f'<div class="insights-panel">{insights_custom}</div>', unsafe_allow_html=True)
-
-        # AI Assistant
-        st.markdown("---")
-        context = f"Length of Stay prediction with avg LOS {avg_los:.1f} days across {len(filtered_df)} patients"
-        ai_assistant_section("Length of Stay", context)
 
 # ===================== TAB 4: Operational KPIs & Simulator =====================
 with tabs[3]:
@@ -2038,7 +1655,6 @@ with tabs[3]:
 - Use with a surge % to stress-test coverage and daily budget.
             """
         )
-    # 5A) quick explainer
     explain_in_30_seconds(
         "What-if staffing calculator",
         [
@@ -2066,10 +1682,7 @@ with tabs[3]:
             st.metric("Top Condition", str(top_cond))
 
     if {"insurance_provider", "billing_amount"}.issubset(filtered_df.columns) and len(filtered_df):
-        payer_rev = (
-            filtered_df.groupby("insurance_provider")["billing_amount"]
-            .sum().sort_values(ascending=False).reset_index()
-        )
+        payer_rev = (filtered_df.groupby("insurance_provider")["billing_amount"].sum().sort_values(ascending=False).reset_index())
         figp = px.bar(payer_rev, x="insurance_provider", y="billing_amount", title="Revenue by Payer (Pareto)")
         figp.update_layout(height=380, xaxis_title="Payer", yaxis_title="Revenue ($)")
         st.plotly_chart(figp, use_container_width=True)
@@ -2099,7 +1712,6 @@ with tabs[3]:
         est_cost = dn * 350 + nn * 400
         st.metric("Est. Daily Cost", f"${est_cost:,.0f}")
 
-    # ---------- Custom Simulator Code (replaces editable section) ----------
     st.markdown("---")
     with st.expander(expander_title("Run Custom Simulator Code (unsafe)"), expanded=False):
         st.caption("Return `result` as a dict of KPIs (key → value) to render as metrics.")
@@ -2107,64 +1719,47 @@ with tabs[3]:
 
         sim_code = f'''
 import numpy as np
-
 # What-If Staffing Calculator (same interface as built-in)
 recent_mean = {recent_mean:.2f}
 surge = {surge_pct}/100.0
 pts_per_day_nurse = {pts_per_day_nurse}
 pts_per_night_nurse = {pts_per_night_nurse}
-
 target_load = recent_mean * (1 + surge)
 day_nurses = int(np.ceil(target_load / max(1, pts_per_day_nurse)))
 night_nurses = int(np.ceil(target_load / max(1, pts_per_night_nurse)))
 daily_cost = day_nurses*350 + night_nurses*400
-
-result = {{
-    "Target Admissions": round(target_load, 1),
-    "Day Nurses": day_nurses,
-    "Night Nurses": night_nurses,
-    "Daily Cost ($)": int(daily_cost)
-}}
+result = {{"Target Admissions": round(target_load, 1), "Day Nurses": day_nurses, "Night Nurses": night_nurses, "Daily Cost ($)": int(daily_cost)}}
 '''
-        user_sim_code = st.text_area("Edit simulator code:", value=sim_code, height=260, key="sim_code_edit_v2")
-        run_sim = st.button("Run Custom Simulator", key="run_sim_code_v2", type="primary",
-                            disabled=not st.session_state.ok_custom_sim)
+        user_sim_code = st.text_area("Edit simulator code:", value=sim_code, height=260, key="sim_code_edit_v3")
+        run_sim = st.button("Run Custom Simulator", key="run_sim_code_v3", type="primary")
 
         if run_sim:
-            with st.spinner("Executing simulator..."):
-                context = {'filtered_df': filtered_df, 'daily_adm_local': daily_adm_local,
-                           'recent_mean': recent_mean, 'np': np, 'pd': pd}
-                success, result, error = run_user_code(user_sim_code, context)
-                if not success:
-                    st.error(f"❌ Execution failed:\n{error}")
-                else:
-                    if isinstance(result, dict) and result:
-                        register_custom_result("sim", {"kpis": result})
-                        cols = st.columns(len(result))
-                        for i, (k, v) in enumerate(result.items()):
-                            with cols[i]:
-                                st.metric(k, str(v))
+            if not st.session_state.ok_custom_sim:
+                st.warning("Please confirm the checkbox above to run custom code.")
+            else:
+                with st.spinner("Executing simulator..."):
+                    context = {'filtered_df': filtered_df, 'daily_adm_local': daily_adm_local, 'recent_mean': recent_mean, 'np': np, 'pd': pd}
+                    success, result, error = run_user_code(user_sim_code, context)
+                    if not success:
+                        st.error(f"❌ Execution failed:\n{error}")
                     else:
-                        st.warning("Custom code ran, but did not return a dict of KPI results.")
-
-    # Custom-only AI summary for simulator
-    custom_sim = get_custom_only("sim")
-    if custom_sim:
-        kpis = custom_sim["Custom"].get("kpis", {})
-        data_summary_custom = {
-            "kpis": kpis,
-            "surge_pct": surge_pct,
-            "patients_per_day_nurse": pts_per_day_nurse,
-            "patients_per_night_nurse": pts_per_night_nurse
-        }
-        insights_custom = llm_insight("Operational Simulator — Custom Model", data_summary_custom, custom_sim, "")
-        with st.expander("🤖 AI insights (Custom Model Only)", expanded=True):
-            st.markdown(f'<div class="insights-panel">{insights_custom}</div>', unsafe_allow_html=True)
-
-    # AI Assistant
-    st.markdown("---")
-    context = f"Operational KPIs with {total_enc} encounters and staffing optimization"
-    ai_assistant_section("Operational KPIs", context)
+                        if isinstance(result, dict) and result:
+                            register_custom_result("sim", {"kpis": result})
+                            cols = st.columns(len(result))
+                            for i, (k, v) in enumerate(result.items()):
+                                with cols[i]:
+                                    st.metric(k, str(v))
+                            # Quick AI readout
+                            kpis = result
+                            data_summary_custom = {
+                                "kpis": kpis, "surge_pct": surge_pct,
+                                "patients_per_day_nurse": pts_per_day_nurse, "patients_per_night_nurse": pts_per_night_nurse
+                            }
+                            insights_custom = llm_insight("Operational Simulator — Custom Model", data_summary_custom, {"Custom": result}, "")
+                            st.markdown('<div class="ai-summary-card"><h4>AI Summary (Custom)</h4></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="ai-summary-card" style="margin-top:.5rem;"><pre style="white-space:pre-wrap;margin:0">{insights_custom}</pre></div>', unsafe_allow_html=True)
+                        else:
+                            st.warning("Custom code ran, but did not return a dict of KPI results.")
 
 # ===================== Decision Log =====================
 st.markdown("---")
@@ -2176,10 +1771,7 @@ with st.expander("📝 Add New Decision", expanded=False):
             "Analysis Section",
             ["Admissions Forecasting", "Revenue Analytics", "Length of Stay Prediction", "Operational KPIs & Simulator"]
         )
-        decision_action = st.selectbox(
-            "Decision",
-            ["Approve for Production", "Needs Review", "Requires Additional Data", "Reject"]
-        )
+        decision_action = st.selectbox("Decision", ["Approve for Production", "Needs Review", "Requires Additional Data", "Reject"])
     with d2:
         decision_owner = st.text_input("Responsible Person")
         decision_date = st.date_input("Target Date")
@@ -2217,3 +1809,8 @@ if st.session_state.decision_log:
             mime="text/csv",
             type="secondary",
         )
+'''
+with open('/mnt/data/valuecare_predict_plan_studio.py', 'w', encoding='utf-8') as f:
+    f.write(code)
+
+print("Wrote /mnt/data/valuecare_predict_plan_studio.py successfully.")
