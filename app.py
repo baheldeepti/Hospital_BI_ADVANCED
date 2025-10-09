@@ -31,7 +31,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.arima.model import ARIMA
-from pages.header import add_top_bar
+#from pages.header import add_top_bar
 
 # ---------------- UI Setup ----------------
 add_top_bar(active_page="Predictive Insights")
