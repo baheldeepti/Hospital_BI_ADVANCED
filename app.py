@@ -276,13 +276,23 @@ def _fmt_num(x, d=1, money=False):
         return f"${f:,.0f}" if money else f"{f:.{d}f}"
     except: return "N/A"
 
+import html
+
 def render_ai_summary(text: str, title: str = "AI Summary"):
-    st.markdown(f"""
-    <div class="ai-summary">
-        <h3>{title}</h3>
-        <p>{text.replace('\n\n','</p><p>').replace('\n','<br/>')}</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Escape first, then format line breaks
+    escaped = html.escape(text or "")
+    safe_text = escaped.replace("\n\n", "</p><p>").replace("\n", "<br/>")
+
+    st.markdown(
+        f"""
+        <div class="ai-summary">
+            <h3>{title}</h3>
+            <p>{safe_text}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 # ---- secure custom code executor (allow-listed imports) ----
 def run_user_code(user_code: str, context: Dict[str, Any]) -> Tuple[bool, Any, str]:
