@@ -1336,7 +1336,7 @@ result = {{
     # AI Assistant
     st.markdown("---")
     context = f"Operational KPIs + staffing what-if. Recent mean admissions={recent_mean:.1f}, ratios D/N={pts_per_day_nurse}/{pts_per_night_nurse}. Role={st.session_state.USER_ROLE}"
-    ai_assistant_section("Operational KPIs", context,  expanded=False
+    ai_assistant_section("Operational KPIs", context,  expanded=False)
 
 # ===================== Decision Log =====================
 st.markdown("---")
